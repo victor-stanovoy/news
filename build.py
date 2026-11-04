@@ -25,6 +25,12 @@ OUT = ROOT / "_site"
 
 csv.field_size_limit(10 ** 9)
 
+
+def asset_ver(name):
+    """Short content hash, appended to asset links so browsers never use a stale cached copy."""
+    p = ASSETS_DIR / name
+    return hashlib.md5(p.read_bytes()).hexdigest()[:8] if p.exists() else "0"
+
 LANG_NAMES = {"en": "English", "de": "Deutsch", "fr": "Français", "es": "Español", "it": "Italiano",
               "pt": "Português", "ru": "Русский", "zh": "中文", "ja": "日本語", "ko": "한국어",
               "ar": "العربية", "tr": "Türkçe", "pl": "Polski", "nl": "Nederlands", "uk": "Українська",
@@ -328,7 +334,7 @@ class Site:
                 f'<meta name="color-scheme" content="light dark">'
                 f'<script>try{{var th=localStorage.getItem("spark-theme");if(th)document.documentElement.dataset.theme=th}}catch(e){{}}</script>'
                 f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}<link rel="icon" href="{icon}">'
-                f'<link rel="stylesheet" href="{root}assets/style.css"></head>')
+                f'<link rel="stylesheet" href="{root}assets/style.css?v={asset_ver("style.css")}"></head>')
 
     def header(self, root, active=""):
         cfg = self.cfg
@@ -394,7 +400,7 @@ class Site:
         data = {"items": [x for x, _ in self.ticker_entries(root)], "tab": t["tab"]}
         blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
         return (f'<script id="spark-ticker-data" type="application/json">{blob}</script>'
-                f'<script src="{root}assets/site.js" defer></script>')
+                f'<script src="{root}assets/site.js?v={asset_ver("site.js")}" defer></script>')
 
     def page(self, title, body, root, active="", **kw):
         return (self.head(title, root, **kw) + self.header(root, active) + self.ticker(root)

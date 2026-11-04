@@ -1,3 +1,7 @@
+/* error log used by the ?debug panel */
+window.__sparkErrors = [];
+window.addEventListener('error', function (e) { window.__sparkErrors.push(e.message); });
+
 /* SparkNews site script. Settings come from site.json -> "ticker". */
 (function () {
   /* ---- pause / play button on the in-page ticker ---- */
@@ -81,4 +85,27 @@
     testing = true; start();
     document.addEventListener('click', function () { testing = false; stop(); }, { once: true });
   }
+})();
+
+/* add ?debug to any page address to see what the page is doing on your device */
+(function () {
+  if (!/[?&]debug\b/.test(location.search)) return;
+  var original = document.title;
+  var box = document.createElement('pre');
+  box.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:99;max-width:92vw;background:#000;color:#0f0;padding:10px;font:12px/1.4 monospace;white-space:pre-wrap;border-radius:6px';
+  document.body.appendChild(box);
+  setInterval(function () {
+    var track = document.querySelector('.track'), cs = track && getComputedStyle(track);
+    var d = document.getElementById('spark-ticker-data'), n = 0;
+    try { n = JSON.parse(d.textContent).items.length; } catch (e) {}
+    box.textContent = [
+      'site.js: running',
+      'ticker bar: ' + (track ? 'found, animation=' + cs.animationName + ' ' + cs.animationPlayState + ' ' + cs.animationDuration : 'MISSING'),
+      'headlines: ' + n,
+      'document.hidden=' + document.hidden + '  hasFocus=' + document.hasFocus(),
+      'tab title now: ' + document.title,
+      'theme: ' + (document.documentElement.dataset.theme || 'system'),
+      'errors: ' + (window.__sparkErrors.join(' | ') || 'none')
+    ].join('\n');
+  }, 400);
 })();

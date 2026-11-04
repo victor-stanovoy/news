@@ -76,6 +76,10 @@ The site follows the visitor's system setting (light or dark) and has a toggle b
 
 To check the tab ticker without leaving the page, add `?tickertest` to any page address (click the page to stop it).
 
+## If something doesn't work
+
+Add `?debug` to any page address (for example `https://victor-stanovoy.github.io/news/?debug`). A small green panel shows whether the script is running, whether the ticker is animating, the tab title, the theme and any errors. Stylesheet and script links carry a version stamp, so browsers pick up new versions automatically after a deploy.
+
 ## Look and feel
 
 All styling is in `assets/style.css`. The colours and fonts are variables at the top of the file. You can replace the whole file with your own stylesheet; the class names used by the pages are `.card`, `.hero`, `.rowc`, `.body`, `.top`, `.menu`, `.foot`, and so on.
