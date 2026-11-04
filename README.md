@@ -70,6 +70,12 @@ Both tickers show the newest articles automatically and are controlled by the `"
 
 Browsers slow down timers in background tabs, so the tab ticker may move slower than the interval you set.
 
+## Dark mode
+
+The site follows the visitor's system setting (light or dark) and has a toggle button in the header that remembers their choice. Colours for both modes are variables at the top of `assets/style.css`.
+
+To check the tab ticker without leaving the page, add `?tickertest` to any page address (click the page to stop it).
+
 ## Look and feel
 
 All styling is in `assets/style.css`. The colours and fonts are variables at the top of the file. You can replace the whole file with your own stylesheet; the class names used by the pages are `.card`, `.hero`, `.rowc`, `.body`, `.top`, `.menu`, `.foot`, and so on.

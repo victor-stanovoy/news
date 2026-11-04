@@ -325,6 +325,8 @@ class Site:
                 "%3Cpath transform='translate(3 3) scale(.75)' fill='%23ff6a2b' d='" + SPARK_PATH + "'/%3E%3C/svg%3E")
         return (f'<!doctype html><html lang="{esc(cfg["language"])}"><head><meta charset="utf-8">'
                 f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+                f'<meta name="color-scheme" content="light dark">'
+                f'<script>try{{var th=localStorage.getItem("spark-theme");if(th)document.documentElement.dataset.theme=th}}catch(e){{}}</script>'
                 f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}<link rel="icon" href="{icon}">'
                 f'<link rel="stylesheet" href="{root}assets/style.css"></head>')
 
@@ -349,7 +351,7 @@ class Site:
         return f'''<body><a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="wrap bar">
 {logo}
-<form class="search" action="{root}search.html" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"><button aria-label="Search">&#9906;</button></form>
+<div class="tools"><form class="search" action="{root}search.html" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"><button aria-label="Search">&#9906;</button></form><button class="theme" type="button" aria-label="Switch light / dark mode" title="Light / dark"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M12 3.5a8.5 8.5 0 0 1 0 17z"/></svg></button></div>
 </div>
 <nav class="wrap menu" aria-label="Sections"><a href="{root}index.html"{" class=on" if active == "" else ""}>Home</a>{nav}</nav></header>'''
 
@@ -383,7 +385,9 @@ class Site:
         return (f'<div class="ticker" role="region" aria-label="Latest headlines"><div class="wrap tk">'
                 f'<span class="lbl"><i></i>{esc(t["label"])}</span>'
                 f'<div class="tv"><div class="track" style="--dur:{dur}s">'
-                f'<div class="set">{one}</div><div class="set" aria-hidden="true">{one}</div></div></div></div></div>')
+                f'<div class="set">{one}</div><div class="set" aria-hidden="true">{one}</div></div></div>'
+                f'<button class="tpause" type="button" aria-label="Pause ticker" title="Pause / play">&#10074;&#10074;</button>'
+                f'</div></div>')
 
     def scripts(self, root):
         t = self.cfg["ticker"]

@@ -1,5 +1,27 @@
 /* SparkNews site script. Settings come from site.json -> "ticker". */
 (function () {
+  /* ---- pause / play button on the in-page ticker ---- */
+  var bar = document.querySelector('.ticker'), btn = document.querySelector('.tpause');
+  if (bar && btn) {
+    btn.addEventListener('click', function () {
+      var paused = bar.classList.toggle('paused');
+      btn.innerHTML = paused ? '&#9654;' : '&#10074;&#10074;';
+    });
+  }
+
+  /* ---- light / dark toggle (remembers the choice) ---- */
+  var tb = document.querySelector('.theme');
+  if (tb) {
+    tb.addEventListener('click', function () {
+      var root = document.documentElement;
+      var now = root.dataset.theme || (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      var next = now === 'dark' ? 'light' : 'dark';
+      root.dataset.theme = next;
+      try { localStorage.setItem('spark-theme', next); } catch (e) {}
+    });
+  }
+
+  /* ---- tab title ticker: runs while the visitor is away from the page ---- */
   var el = document.getElementById('spark-ticker-data');
   if (!el) return;
   var data;
@@ -7,35 +29,56 @@
   var t = data.tab, items = data.items || [];
   if (!t || !t.enabled || !items.length) return;
 
-  var original = document.title, timer = null, pos = 0, idx = 0;
+  var original = document.title, timer = null, startedAt = 0, testing = false;
+  var sep = t.separator || '  ●  ';
+  var text = (t.prefix || '') + items.join(sep) + sep;
 
-  function tickScroll(text) {
-    var win = t.window_chars || 34;
-    var loop = text.repeat(Math.ceil((win * 2) / text.length) + 1);
-    document.title = loop.substr(pos, win);
-    pos = (pos + (t.step || 2)) % text.length;
-  }
-  function tickHeadline() {
-    document.title = (t.prefix || '') + items[idx];
-    idx = (idx + 1) % items.length;
+  /* Position comes from elapsed time, not from counting ticks, so the speed stays
+     right even when the browser slows timers down in a background tab. */
+  function render() {
+    var elapsed = Date.now() - startedAt;
+    if (t.mode === 'headline') {
+      var i = Math.floor(elapsed / (t.headline_interval_ms || 3000)) % items.length;
+      document.title = (t.prefix || '') + items[i];
+    } else {
+      var win = t.window_chars || 34;
+      var pos = (Math.floor(elapsed / (t.interval_ms || 350)) * (t.step || 2)) % text.length;
+      var loop = text.repeat(Math.ceil((win * 2) / text.length) + 1);
+      document.title = loop.substr(pos, win);
+    }
   }
   function start() {
     if (timer) return;
-    pos = 0; idx = 0;
-    if (t.mode === 'headline') {
-      tickHeadline();
-      timer = setInterval(tickHeadline, t.headline_interval_ms || 3000);
-    } else {
-      var text = (t.prefix || '') + items.join(t.separator || '  ●  ') + (t.separator || '  ●  ');
-      tickScroll(text);
-      timer = setInterval(function () { tickScroll(text); }, t.interval_ms || 350);
-    }
+    startedAt = Date.now();
+    render();
+    timer = setInterval(render, Math.min(t.interval_ms || 350, t.mode === 'headline' ? 500 : 350));
   }
   function stop() {
+    if (!timer) return;
     clearInterval(timer); timer = null;
     document.title = original;
   }
+
+  /* leaving = switching tab / minimising, or the window losing focus (clicking another window) */
   document.addEventListener('visibilitychange', function () {
+    if (testing) return;
     if (document.hidden) start(); else stop();
   });
+  window.addEventListener('blur', function () {
+    if (testing) return;
+    /* clicking into an embedded quiz/interactive also fires blur; that is not leaving */
+    setTimeout(function () {
+      var a = document.activeElement;
+      if (a && a.tagName === 'IFRAME') return;
+      start();
+    }, 0);
+  });
+  window.addEventListener('focus', function () { if (!testing) stop(); });
+  if (document.hidden) start();
+
+  /* add ?tickertest to any page address to preview the tab ticker without leaving; click the page to stop */
+  if (/[?&]tickertest\b/.test(location.search)) {
+    testing = true; start();
+    document.addEventListener('click', function () { testing = false; stop(); }, { once: true });
+  }
 })();
