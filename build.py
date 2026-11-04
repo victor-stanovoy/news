@@ -25,8 +25,17 @@ OUT = ROOT / "_site"
 
 csv.field_size_limit(10 ** 9)
 
+LANG_NAMES = {"en": "English", "de": "Deutsch", "fr": "Français", "es": "Español", "it": "Italiano",
+              "pt": "Português", "ru": "Русский", "zh": "中文", "ja": "日本語", "ko": "한국어",
+              "ar": "العربية", "tr": "Türkçe", "pl": "Polski", "nl": "Nederlands", "uk": "Українська",
+              "hi": "हिन्दी", "he": "עברית", "fa": "فارسی", "ur": "اردو"}
+RTL_LANGS = {"ar", "he", "fa", "ur"}
+SPARK_PATH = "M12 0C13 7 17 11 24 12C17 13 13 17 12 24C11 17 7 13 0 12C7 11 11 7 12 0Z"
+
 DEFAULT_CONFIG = {
-    "site_name": "Daily News",
+    "site_name": "SparkNews™",
+    "logo_left": "Spark",           # logo is drawn as  <spark icon> Spark News ™
+    "logo_right": "News",
     "tagline": "Independent news, analysis and features",
     "language": "en",
     "base_url": "",                 # e.g. https://victor-stanovoy.github.io/news  (used for social tags)
@@ -195,6 +204,16 @@ def load_articles(cfg, now):
                 a.live_label = g("live_update_label") or "LIVE"
                 a.live_updates = [u for u in json_list(g("live_updates")) if isinstance(u, dict)]
                 a.citations = row.get("citations") or ""
+                a.ai_translated = truthy(g("is_ai_translated"))
+                a.translations = {}
+                try:
+                    tdata = json.loads(g("translations") or "{}")
+                except ValueError:
+                    tdata = {}
+                if isinstance(tdata, dict):
+                    for lang, v in tdata.items():
+                        if isinstance(v, dict) and (v.get("content") or v.get("title")):
+                            a.translations[lang.lower()] = v
                 a.series_id = g("series_id")
                 a.series_order = to_int(g("series_order"))
                 a.verified = truthy(g("author_verified"))
@@ -263,7 +282,7 @@ class Site:
                 f'{" loading=lazy" if lazy else ""}>')
 
     # -- chrome
-    def head(self, title, root, desc="", image="", path="", kind="website"):
+    def head(self, title, root, desc="", image="", path="", kind="website", alts=None):
         cfg = self.cfg
         full = f"{title} | {cfg['site_name']}" if title else cfg["site_name"]
         desc = desc or cfg["tagline"]
@@ -276,9 +295,12 @@ class Site:
             og += f'<meta property="og:image" content="{esc(image)}"><meta name="twitter:card" content="summary_large_image">'
         if base and path:
             og += f'<link rel="canonical" href="{esc(base + "/" + path)}"><meta property="og:url" content="{esc(base + "/" + path)}">'
+        alt = "".join(f'<link rel="alternate" hreflang="{l}" href="{esc(base + "/" + u if base else u)}">' for l, u in (alts or []))
+        icon = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230e1116'/%3E"
+                "%3Cpath transform='translate(3 3) scale(.75)' fill='%23ff6a2b' d='" + SPARK_PATH + "'/%3E%3C/svg%3E")
         return (f'<!doctype html><html lang="{esc(cfg["language"])}"><head><meta charset="utf-8">'
                 f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-                f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}'
+                f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}<link rel="icon" href="{icon}">'
                 f'<link rel="stylesheet" href="{root}assets/style.css"></head>')
 
     def header(self, root, active=""):
@@ -286,6 +308,13 @@ class Site:
         links = [
             f'<a href="{root}c/{slug}.html"{" class=on aria-current=page" if slug == active else ""}>{esc(c["name"])}</a>'
             for slug, c in self.cats.items()]
+        if cfg["logo_left"]:
+            tm = "<sup>™</sup>" if "™" in cfg["site_name"] else ""
+            logo = (f'<a class="logo" href="{root}index.html" aria-label="{esc(cfg["site_name"])} home">'
+                    f'<svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><path d="{SPARK_PATH}"/></svg>'
+                    f'<span><b>{esc(cfg["logo_left"])}</b>{esc(cfg["logo_right"])}{tm}</span></a>')
+        else:
+            logo = f'<a class="logo" href="{root}index.html">{esc(cfg["site_name"])}</a>'
         n = cfg["nav_max"]
         nav = "".join(links[:n])
         if len(links) > n:
@@ -294,7 +323,7 @@ class Site:
                     f'<div class="morep wrap">{"".join(links[n:])}</div></details>')
         return f'''<body><a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="wrap bar">
-<a class="logo" href="{root}index.html" aria-label="{esc(cfg["site_name"])} home"><b>{esc(cfg["site_name"].split()[0])}</b>{esc(" ".join(cfg["site_name"].split()[1:]))}</a>
+{logo}
 <form class="search" action="{root}search.html" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"><button aria-label="Search">&#9906;</button></form>
 </div>
 <nav class="wrap menu" aria-label="Sections"><a href="{root}index.html"{" class=on" if active == "" else ""}>Home</a>{nav}</nav></header>'''
@@ -406,8 +435,16 @@ class Site:
 </script>'''
         return self.page("Search", body, root, path="search.html")
 
-    def article(self, a):
+    def article(self, a, lang=None):
         root = "../"
+        tr = a.translations.get(lang) if lang else None
+        title = (tr.get("title") or a.title) if tr else a.title
+        subtitle = (tr.get("subtitle") or "") if tr else a.subtitle
+        body_html = a.body_html
+        if tr:
+            c = tr.get("content") or ""
+            body_html = sanitize(c if re.search(r"<\w+[^>]*>", c) else plain_to_html(c))
+        fname = a.slug + (f".{lang}" if lang else "")
         same = [x for x in self.cats[a.cat_slug]["items"] if x is not a]
         related = same[:3]
         parts = []
@@ -421,10 +458,21 @@ class Site:
         live = f'<span class="live">{esc(a.live_label)}</span>' if a.is_live else ""
         parts.append(
             f'<header class="ah"><p class="kicker"><a href="{root}c/{a.cat_slug}.html">{esc(a.category)}</a></p>'
-            f'<h1>{live}{esc(a.title)}</h1>'
-            f'{"<p class=sub>" + esc(a.subtitle) + "</p>" if a.subtitle else ""}'
+            f'<h1>{live}{esc(title)}</h1>'
+            f'{"<p class=sub>" + esc(subtitle) + "</p>" if subtitle else ""}'
             f'<p class="byline">{by}<time datetime="{a.date.isoformat()}">{fmt_datetime(a.date)}</time>{upd}'
             f' · {a.read_min} min read</p></header>')
+
+        if a.translations:
+            pills = f'<a href="{a.slug}.html"{" class=on" if not lang else ""}>Original</a>'
+            for l in a.translations:
+                pills += (f'<a href="{a.slug}.{l}.html" hreflang="{l}" lang="{l}"'
+                          f'{" class=on" if l == lang else ""}>{esc(LANG_NAMES.get(l, l.upper()))}</a>')
+            parts.append(f'<nav class="langs" aria-label="Languages"><span>&#127760; Read in</span>{pills}</nav>')
+            if lang:
+                kind = "automatic" if a.ai_translated else ""
+                parts.append(f'<p class="trnote">This is an {kind + " " if kind else ""}translation. '
+                             f'<a href="{a.slug}.html">Read the original</a></p>')
 
         src = self.img(a.image_raw, root)
         if src:
@@ -449,12 +497,12 @@ class Site:
                         f'<div>{plain_to_html(str(u.get("text", "")))}</div></li>')
             parts.append(f'<section class="liveb"><h2>{esc(a.live_label)}</h2><ol>{lis}</ol></section>')
 
-        if a.is_embed:
+        if a.is_embed and not tr:
             parts.append(f'<iframe class="embed" src="{a.slug}-embed.html" title="{esc(a.title)}" '
                          f'></iframe>'
                          f'<p class="count"><a href="{a.slug}-embed.html" target="_blank">Open full screen &rsaquo;</a></p>')
         else:
-            parts.append(f'<div class="body">{a.body_html}</div>')
+            parts.append(f'<div class="body">{body_html}</div>')
 
         if a.extra_images:
             figs = "".join(f'<figure><img src="{esc(self.img(u, root))}" alt="" loading="lazy" referrerpolicy="no-referrer"></figure>'
@@ -473,21 +521,24 @@ class Site:
                 lis = "".join(f'<li{" class=cur" if x is a else ""}><a href="{x.slug}.html">{esc(x.title)}</a></li>' for x in ser)
                 parts.append(f'<section class="series"><h2>In this series</h2><ol>{lis}</ol></section>')
 
-        share_url = esc(self.cfg["base_url"].rstrip("/") + f"/a/{a.slug}.html") if self.cfg["base_url"] else ""
+        share_url = esc(self.cfg["base_url"].rstrip("/") + f"/a/{fname}.html") if self.cfg["base_url"] else ""
         if share_url:
-            t = esc(a.title)
+            t = esc(title)
             parts.append(f'<div class="share"><span>Share</span>'
                          f'<a href="https://twitter.com/intent/tweet?url={share_url}&amp;text={t}" target="_blank" rel="noopener">X</a>'
                          f'<a href="https://www.facebook.com/sharer/sharer.php?u={share_url}" target="_blank" rel="noopener">Facebook</a>'
                          f'<a href="https://wa.me/?text={t}%20{share_url}" target="_blank" rel="noopener">WhatsApp</a>'
                          f'<a href="mailto:?subject={t}&amp;body={share_url}">Email</a></div>')
 
-        art = f'<article class="wrap narrow">{"".join(parts)}</article>'
+        dattr = f' lang="{lang}" dir="{"rtl" if lang in RTL_LANGS else "ltr"}"' if lang else ""
+        art = f'<article class="wrap narrow"{dattr}>{"".join(parts)}</article>'
         if related:
             art += (f'<section class="wrap rel"><h2 class="sec">More in {esc(a.category)}</h2>'
                     f'<div class="grid3">{"".join(self.card(x, root) for x in related)}</div></section>')
-        return self.page(a.title, art, root, active=a.cat_slug, desc=a.excerpt, image=src, kind="article",
-                         path=f"a/{a.slug}.html")
+        desc = (strip_tags(subtitle or body_html)[:160] if tr else a.excerpt)
+        alts = [("x-default", f"a/{a.slug}.html")] + [(l, f"a/{a.slug}.{l}.html") for l in a.translations] if a.translations else None
+        return self.page(title, art, root, active=a.cat_slug, desc=desc, image=src, kind="article",
+                         path=f"a/{fname}.html", alts=alts)
 
     def embed_page(self, a):
         h = a.raw_content
@@ -504,7 +555,8 @@ class Site:
         if not base:
             return None
         urls = [f"{base}/index.html"] + [f"{base}/c/{s}.html" for s in self.cats] + \
-               [f"{base}/a/{a.slug}.html" for a in self.arts]
+               [f"{base}/a/{a.slug}.html" for a in self.arts] + \
+               [f"{base}/a/{a.slug}.{l}.html" for a in self.arts for l in a.translations]
         return ('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
                 + "".join(f"<url><loc>{esc(u)}</loc></url>" for u in urls) + "</urlset>")
 
@@ -545,10 +597,13 @@ def main():
         w(f"a/{a.slug}.html", site.article(a))
         if a.is_embed:
             w(f"a/{a.slug}-embed.html", site.embed_page(a))
+        for lang in a.translations:
+            w(f"a/{a.slug}.{lang}.html", site.article(a, lang))
     w("search.json", json.dumps([{
         "t": a.title, "s": a.subtitle, "c": a.category, "d": a.date.isoformat(), "df": fmt_date(a.date),
         "e": a.excerpt, "u": f"a/{a.slug}.html",
-        "x": strip_tags(a.body_html)[:3000] if not a.is_embed else ""} for a in arts], ensure_ascii=False))
+        "x": (strip_tags(a.body_html)[:3000] if not a.is_embed else "") + " " + " ".join(
+            (v.get("title") or "") + " " + (v.get("subtitle") or "") for v in a.translations.values())} for a in arts], ensure_ascii=False))
     w("feed.xml", site.feed())
     sm = site.sitemap()
     if sm:

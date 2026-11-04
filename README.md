@@ -1,4 +1,4 @@
-# Daily News
+# SparkNews™
 
 A static news website. You add articles by dropping a **CSV file into the `articles/` folder** and pushing to GitHub. A GitHub Action rebuilds and publishes the site automatically.
 
@@ -36,6 +36,12 @@ The CSV uses the same columns as your article export. Only these matter for the 
 | `views` | | Used for the "Most read" box |
 
 All other columns are accepted and ignored for now (AI review, approvals, logistics, paywall, translations, badges, etc.). They are kept in the CSV so they can be used when those features get built.
+
+### Translations
+
+If the `translations` column holds JSON like
+`{"es":{"title":"…","subtitle":"…","content":"<p>…</p>"},"fr":null}`,
+the article automatically gets a "Read in" language switcher and one page per language (Arabic is shown right-to-left). Languages with `null` are ignored. Translated titles are searchable too.
 
 ### Your own images
 

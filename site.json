@@ -1,5 +1,7 @@
 {
-  "site_name": "Daily News",
+  "site_name": "SparkNews™",
+  "logo_left": "Spark",
+  "logo_right": "News",
   "tagline": "Independent news, analysis and features",
   "language": "en",
   "base_url": "https://victor-stanovoy.github.io/news",
