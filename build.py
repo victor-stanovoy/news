@@ -45,6 +45,24 @@ DEFAULT_CONFIG = {
     "nav_max": 8,                   # sections shown in the menu; the rest go under "More"
     "nav_order": [],                # optional: categories listed first in the menu
     "footer_text": "",
+    "ticker": {
+        "enabled": True,            # scrolling headline bar under the menu
+        "label": "LATEST",          # text on the coloured tag at the left
+        "count": 10,                # how many of the newest articles to show
+        "speed": 60,                # scroll speed in pixels per second
+        "custom": [],               # your own headlines instead of the newest articles:
+                                    #   ["Plain text", {"text": "With link", "url": "a/some-article.html"}]
+        "tab": {
+            "enabled": True,        # turn the browser tab title into a ticker when the visitor leaves the page
+            "mode": "scroll",       # "scroll" = text slides along, "headline" = one headline at a time
+            "prefix": "\u26a1 ",     # shown before the headlines
+            "separator": "  \u25cf  ",
+            "window_chars": 34,     # how many characters of the title are visible at once
+            "step": 2,              # characters moved per tick
+            "interval_ms": 350,     # time between ticks (scroll mode)
+            "headline_interval_ms": 3000,   # time per headline (headline mode)
+        },
+    },
 }
 
 
@@ -148,7 +166,14 @@ def load_config():
     cfg = dict(DEFAULT_CONFIG)
     p = ROOT / "site.json"
     if p.exists():
-        cfg.update(json.loads(p.read_text(encoding="utf-8")))
+        def merge(base, new):
+            for k, v in new.items():
+                if isinstance(v, dict) and isinstance(base.get(k), dict):
+                    merge(base[k], v)
+                else:
+                    base[k] = v
+        cfg = json.loads(json.dumps(cfg))
+        merge(cfg, json.loads(p.read_text(encoding="utf-8")))
     return cfg
 
 
@@ -333,10 +358,43 @@ class Site:
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
         return (f'<footer class="foot"><div class="wrap"><div class="fcats">{cats}</div>{extra}'
-                f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer></body></html>')
+                f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
+
+    def ticker_entries(self, root):
+        t = self.cfg["ticker"]
+        out = []
+        if t["custom"]:
+            for it in t["custom"]:
+                text, url = (it, "") if isinstance(it, str) else (it.get("text", ""), it.get("url", ""))
+                if text:
+                    out.append((text, url if re.match(r"^(https?:)?//|^#", url) or not url else root + url.lstrip("/")))
+        else:
+            out = [(a.title, self.url(a, root)) for a in self.arts[:t["count"]]]
+        return out
+
+    def ticker(self, root):
+        t = self.cfg["ticker"]
+        items = self.ticker_entries(root)
+        if not t["enabled"] or not items:
+            return ""
+        one = "".join(f'<a href="{esc(u)}">{esc(x)}</a>' if u else f"<span>{esc(x)}</span>" for x, u in items)
+        width = sum(len(x) * 7.6 + 56 for x, _ in items)
+        dur = max(20, round(width / max(10, t["speed"]), 1))
+        return (f'<div class="ticker" role="region" aria-label="Latest headlines"><div class="wrap tk">'
+                f'<span class="lbl"><i></i>{esc(t["label"])}</span>'
+                f'<div class="tv"><div class="track" style="--dur:{dur}s">'
+                f'<div class="set">{one}</div><div class="set" aria-hidden="true">{one}</div></div></div></div></div>')
+
+    def scripts(self, root):
+        t = self.cfg["ticker"]
+        data = {"items": [x for x, _ in self.ticker_entries(root)], "tab": t["tab"]}
+        blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+        return (f'<script id="spark-ticker-data" type="application/json">{blob}</script>'
+                f'<script src="{root}assets/site.js" defer></script>')
 
     def page(self, title, body, root, active="", **kw):
-        return self.head(title, root, **kw) + self.header(root, active) + f'<main id="main">{body}</main>' + self.footer(root)
+        return (self.head(title, root, **kw) + self.header(root, active) + self.ticker(root)
+                + f'<main id="main">{body}</main>' + self.footer(root))
 
     # -- cards
     def meta(self, a, with_cat=True):

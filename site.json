@@ -9,5 +9,22 @@
   "most_read_count": 5,
   "home_category_sections": 6,
   "nav_order": [],
-  "footer_text": ""
+  "footer_text": "",
+  "ticker": {
+    "enabled": true,
+    "label": "LATEST",
+    "count": 10,
+    "speed": 60,
+    "custom": [],
+    "tab": {
+      "enabled": true,
+      "mode": "scroll",
+      "prefix": "⚡ ",
+      "separator": "  ●  ",
+      "window_chars": 34,
+      "step": 2,
+      "interval_ms": 350,
+      "headline_interval_ms": 3000
+    }
+  }
 }

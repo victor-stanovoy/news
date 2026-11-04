@@ -51,6 +51,25 @@ Put image files in `articles/images/` and write just the file name in `image_url
 
 `site.json` holds the site name, tagline, public address, how many sections show in the menu, and so on.
 
+## Tickers
+
+Both tickers show the newest articles automatically and are controlled by the `"ticker"` block in `site.json`:
+
+| Setting | What it does |
+|---|---|
+| `enabled` | Turns the scrolling bar under the menu on or off |
+| `label` | Text on the coloured tag at the left (`LATEST`, `BREAKING`, …) |
+| `count` | How many of the newest articles are shown |
+| `speed` | Scroll speed in pixels per second (the bar pauses when hovered) |
+| `custom` | Your own headlines instead of the newest articles, e.g. `["Plain text", {"text":"With link","url":"a/some-article.html"}]` |
+| `tab.enabled` | Turns the tab-title ticker on or off. It starts when a visitor switches to another tab and stops when they come back |
+| `tab.mode` | `scroll` (text slides along) or `headline` (one headline at a time) |
+| `tab.prefix`, `tab.separator` | Symbols before and between headlines |
+| `tab.window_chars`, `tab.step`, `tab.interval_ms` | How much of the title is visible, how far it moves, and how often (scroll mode) |
+| `tab.headline_interval_ms` | Seconds per headline in `headline` mode, in milliseconds |
+
+Browsers slow down timers in background tabs, so the tab ticker may move slower than the interval you set.
+
 ## Look and feel
 
 All styling is in `assets/style.css`. The colours and fonts are variables at the top of the file. You can replace the whole file with your own stylesheet; the class names used by the pages are `.card`, `.hero`, `.rowc`, `.body`, `.top`, `.menu`, `.foot`, and so on.
