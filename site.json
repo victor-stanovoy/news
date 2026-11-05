@@ -28,7 +28,7 @@
     }
   },
   "supabase": {
-    "url": "https://szxyyvxnhecquulzorqo.supabase.co/rest/v1/",
+    "url": "https://szxyyvxnhecquulzorqo.supabase.co",
     "anon_key": "sb_publishable_2LTRSdkQBnAUJ-gN70qAbQ_7Q_7bd9h"
   }
 }

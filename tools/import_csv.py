@@ -94,6 +94,7 @@ def main():
                 url = (json.load(fh).get("supabase") or {}).get("url", "").strip().rstrip("/")
         except (OSError, ValueError):
             pass
+    url = re.sub(r"/(rest|auth|storage)/v1$", "", url.rstrip("/"), flags=re.I).rstrip("/")   # tolerate a pasted /rest/v1
     if not url or not key:
         sys.exit("Missing settings: the Supabase address (site.json > supabase > url) and the SUPABASE_SERVICE_KEY secret.")
 

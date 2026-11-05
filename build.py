@@ -306,9 +306,16 @@ class Article:
     pass
 
 
+def clean_db_url(u):
+    """Accept the project address however it was copied: with or without a trailing slash or /rest/v1."""
+    u = (u or "").strip().rstrip("/")
+    u = re.sub(r"/(rest|auth|storage)/v1$", "", u, flags=re.I)
+    return u.rstrip("/")
+
+
 def db_settings(cfg):
     sbc = cfg.get("supabase") or {}
-    url = (os.environ.get("SUPABASE_URL") or sbc.get("url") or "").strip().rstrip("/")
+    url = clean_db_url(os.environ.get("SUPABASE_URL") or sbc.get("url"))
     key = (os.environ.get("SUPABASE_ANON_KEY") or sbc.get("anon_key") or "").strip()
     return url, key
 
@@ -336,7 +343,13 @@ def db_get(url, key, path, method="GET", body=None, extra=None):
         except (urllib.error.URLError, TimeoutError, ValueError) as e:
             last = str(e)
         time.sleep(2 * (attempt + 1))
-    sys.exit(f"Could not read articles from the database ({path}): {last}\n"
+    hint = ""
+    if "404" in str(last):
+        hint = ("\nHint: HTTP 404 usually means the address in site.json is wrong (it should look like https://abcdxyz.supabase.co) "
+                "or the tables are missing (run supabase/schema.sql in the Supabase SQL Editor).")
+    elif "401" in str(last) or "403" in str(last):
+        hint = "\nHint: the key in site.json is not accepted. Use the Publishable (anon) key, not the Secret key."
+    sys.exit(f"Could not read articles from the database ({path}): {last}{hint}\n"
              f"Build stopped so the live site is not replaced by an incomplete one.")
 
 
