@@ -347,6 +347,9 @@ def db_get(url, key, path, method="GET", body=None, extra=None):
     if "404" in str(last):
         hint = ("\nHint: HTTP 404 usually means the address in site.json is wrong (it should look like https://abcdxyz.supabase.co) "
                 "or the tables are missing (run supabase/schema.sql in the Supabase SQL Editor).")
+    elif "42501" in str(last) or "permission denied" in str(last):
+        hint = ("\nHint: the database refused access. Run the latest supabase/schema.sql again in the Supabase SQL Editor "
+                "(it contains the permissions this needs). The key and address are fine.")
     elif "401" in str(last) or "403" in str(last):
         hint = "\nHint: the key in site.json is not accepted. Use the Publishable (anon) key, not the Secret key."
     sys.exit(f"Could not read articles from the database ({path}): {last}{hint}\n"

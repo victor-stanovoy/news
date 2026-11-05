@@ -21,7 +21,7 @@ article is online a minute or two later. Articles are stored in a free [Supabase
 ### One-time setup (about 15 minutes)
 
 1. **Create the database.** Sign up at supabase.com and create a project (any name, region *Central EU (Frankfurt)*, save the database password).
-2. **Create the tables.** In the project open **SQL Editor > New query**, paste the whole file `supabase/schema.sql`, press **Run**. It should say *Success*.
+2. **Create the tables.** In the project open **SQL Editor > New query**, paste the whole file `supabase/schema.sql`, press **Run**. It should say *Success*. It is safe to run again at any time (do this whenever a newer version of the file is published).
 3. **Connect the website.** In Supabase open **Project Settings > API**. Copy the **Project URL** and the **anon / publishable key** into `site.json`:
    ```json
    "supabase": { "url": "https://abcdxyz.supabase.co", "anon_key": "eyJ..." }
@@ -54,6 +54,7 @@ article is online a minute or two later. Articles are stored in a free [Supabase
 - **Backups.** In Supabase, *Database > Backups* (or export the `articles` table as CSV) keeps a copy. A CSV export can be dropped into `articles/` as before.
 - **Security.** Articles are cleaned before publishing: scripts and unsafe links are removed. Only admins can create full-HTML pages.
   Visitors can only read published articles. Everything is enforced by rules inside the database, not just by the editor page.
+- **"permission denied for table articles"** in a failed build means the database has not got the latest permissions: paste the current `supabase/schema.sql` into the SQL Editor and Run it again, then re-run the failed build in the Actions tab.
 - **If a build fails** with "Could not read articles from the database", check that `site.json` has the right URL and key and that the Supabase project is not paused (free projects pause after a week of no use).
 
 ## Adding articles with CSV files

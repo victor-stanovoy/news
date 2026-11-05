@@ -167,6 +167,17 @@ returns setof text language sql security definer stable set search_path = public
 $$;
 grant execute on function public.known_article_ids() to anon, authenticated;
 
+-- ---------------------------------------------------------------- permissions
+-- Newer Supabase projects do not give the public roles access to new tables automatically, so it is granted here.
+-- This only opens the door to the tables: what each person may actually read or change is decided by the
+-- row-level security policies above (anonymous visitors can only ever see live articles).
+grant usage on schema public to anon, authenticated;
+grant select on public.articles to anon, authenticated;
+grant insert, update, delete on public.articles to authenticated;
+grant select, insert, update, delete on public.editors to authenticated;
+grant execute on function public.editor_role() to anon, authenticated;
+grant execute on function public.known_article_ids() to anon, authenticated;
+
 -- ---------------------------------------------------------------- image uploads
 insert into storage.buckets (id, name, public) values ('images', 'images', true) on conflict (id) do nothing;
 
