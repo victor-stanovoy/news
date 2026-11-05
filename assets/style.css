@@ -205,3 +205,7 @@ a:hover>.thumb img,a:hover .thumb img{transform:scale(1.045)}
 .theme:hover{background:rgba(255,255,255,.2);transform:rotate(180deg)}
 :root[data-theme=dark] .body a{color:var(--accent)}
 :root[data-theme=dark] img{filter:brightness(.92)}
+
+.editlink{display:inline-block;margin-top:10px;font-size:13px;font-weight:700;border:1px solid var(--line);padding:4px 12px;border-radius:999px;color:var(--accent)}
+.editlink[hidden]{display:none}
+.editlink:hover{background:var(--soft)}

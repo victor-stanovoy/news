@@ -13,6 +13,12 @@ window.addEventListener('error', function (e) { window.__sparkErrors.push(e.mess
     });
   }
 
+  /* ---- "Edit this article" link, shown only to people who are signed in to the editor ---- */
+  try {
+    var signedIn = Object.keys(localStorage).some(function (k) { return /^sb-.*-auth-token$/.test(k); });
+    if (signedIn) document.querySelectorAll('.editlink').forEach(function (a) { a.hidden = false; });
+  } catch (e) {}
+
   /* ---- light / dark toggle (remembers the choice) ---- */
   var tb = document.querySelector('.theme');
   if (tb) {

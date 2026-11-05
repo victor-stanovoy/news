@@ -1,10 +1,62 @@
 # SparkNews™
 
-A static news website. You add articles by dropping a **CSV file into the `articles/` folder** and pushing to GitHub. A GitHub Action rebuilds and publishes the site automatically.
+A static news website. You can add articles in the **online editor** (see below) or by dropping a **CSV file into the `articles/` folder** and pushing to GitHub. A GitHub Action rebuilds and publishes the site automatically.
 
 Live site (after enabling Pages, see below): https://victor-stanovoy.github.io/news/
 
-## Adding articles
+## Online editor (write and publish on the website)
+
+The editor lives at **https://victor-stanovoy.github.io/news/editor/**. People sign in, write articles in a rich-text editor
+(headline, photos, sections, translations, scheduling, live pages) and press **Publish**. The website rebuilds itself and the
+article is online a minute or two later. Articles are stored in a free [Supabase](https://supabase.com) database.
+
+**Roles** (an admin gives these out in the editor's **Team** panel):
+
+| Role | Can do |
+|---|---|
+| Admin | Everything: delete articles, full-HTML / interactive pages, manage the team |
+| Editor | Write, edit and publish any article |
+| Writer | Write drafts and edit their own drafts. An editor publishes them |
+
+### One-time setup (about 15 minutes)
+
+1. **Create the database.** Sign up at supabase.com and create a project (any name, region *Central EU (Frankfurt)*, save the database password).
+2. **Create the tables.** In the project open **SQL Editor > New query**, paste the whole file `supabase/schema.sql`, press **Run**. It should say *Success*.
+3. **Connect the website.** In Supabase open **Project Settings > API**. Copy the **Project URL** and the **anon / publishable key** into `site.json`:
+   ```json
+   "supabase": { "url": "https://abcdxyz.supabase.co", "anon_key": "eyJ..." }
+   ```
+   Both values are meant to be public. Never put the *service_role / secret* key in this file.
+4. **Allow logins from the editor page.** In Supabase open **Authentication > URL Configuration**. Set **Site URL** to
+   `https://victor-stanovoy.github.io/news/editor/` and add the same address under **Redirect URLs**.
+5. **Make yourself admin.** Open the editor page, enter your email and press **Email me a login link**, then click the link in the email.
+   You will see "No editor access yet". Now in Supabase **SQL Editor** run (with your email):
+   ```sql
+   insert into public.editors (user_id, role, name)
+   select id, 'admin', 'Your Name' from auth.users where email = 'you@example.com';
+   ```
+   Reload the editor. After this, add everyone else from the editor's **Team** panel (they first open the editor page and request a login link so their account exists).
+6. **Copy the existing articles into the database (once).** In GitHub open **Settings > Secrets and variables > Actions > New repository secret**,
+   name it `SUPABASE_SERVICE_KEY` and paste the *service_role / secret* key from Supabase **Project Settings > API**.
+   Then open the **Actions** tab, choose **Import articles into the database**, press **Run workflow**.
+7. **Push `site.json`.** The site rebuilds and from now on shows the database articles. Every article address stays exactly the same.
+
+### Good to know
+
+- **Where articles come from.** Database articles and CSV files in `articles/` are combined. If the same article is in both, the database wins.
+  An article you hide in the editor (draft, taken down, scheduled) never reappears from an old CSV.
+- **Safe by design.** If the database cannot be reached while the site builds, the build stops and the live site stays as it was.
+- **Faster updates (optional).** Without extras the site rebuilds on every push and once an hour. For an instant rebuild after each Publish, follow the
+  comment at the end of `supabase/schema.sql` (a GitHub token stored in the database, never visible to the website).
+- **Images** uploaded in the editor are stored in Supabase (free plan: 1 GB). Images from other websites can be used by address.
+- **Signed-in editors** see an **Edit this article** button on every article page.
+- **Slugs.** An article's web address is created when it is first saved and never changes, even if the headline is edited.
+- **Backups.** In Supabase, *Database > Backups* (or export the `articles` table as CSV) keeps a copy. A CSV export can be dropped into `articles/` as before.
+- **Security.** Articles are cleaned before publishing: scripts and unsafe links are removed. Only admins can create full-HTML pages.
+  Visitors can only read published articles. Everything is enforced by rules inside the database, not just by the editor page.
+- **If a build fails** with "Could not read articles from the database", check that `site.json` has the right URL and key and that the Supabase project is not paused (free projects pause after a week of no use).
+
+## Adding articles with CSV files
 
 1. Put a `.csv` file in `articles/` (any file name; one file can hold many articles, one per row).
 2. Commit and push (or upload through the GitHub web interface: **Add file → Upload files**).

@@ -26,5 +26,9 @@
       "interval_ms": 350,
       "headline_interval_ms": 3000
     }
+  },
+  "supabase": {
+    "url": "",
+    "anon_key": ""
   }
 }

@@ -6,6 +6,8 @@ on:
   schedule:
     - cron: "17 * * * *"   # hourly rebuild so scheduled articles go live on time
   workflow_dispatch:
+  repository_dispatch:
+    types: [articles-changed]   # sent by the database when a live article changes (optional, see README)
 
 permissions:
   contents: read

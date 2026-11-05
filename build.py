@@ -12,6 +12,12 @@ import csv
 import hashlib
 import html
 import json
+import urllib.parse
+from html.parser import HTMLParser
+import os
+import time
+import urllib.error
+import urllib.request
 import re
 import shutil
 import sys
@@ -51,6 +57,7 @@ DEFAULT_CONFIG = {
     "nav_max": 8,                   # sections shown in the menu; the rest go under "More"
     "nav_order": [],                # optional: categories listed first in the menu
     "footer_text": "",
+    "supabase": {"url": "", "anon_key": ""},   # the editor and database; both values are safe to publish
     "ticker": {
         "enabled": True,            # scrolling headline bar under the menu
         "label": "LATEST",          # text on the coloured tag at the left
@@ -143,11 +150,142 @@ def clean_title(t):
     return (t or "").strip().strip("*").strip()
 
 
+_OK_TAGS = {"a", "abbr", "b", "blockquote", "br", "caption", "cite", "code", "col", "colgroup", "dd", "del", "details",
+            "div", "dl", "dt", "em", "figcaption", "figure", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "iframe", "img",
+            "ins", "li", "mark", "ol", "p", "pre", "q", "s", "small", "span", "strike", "strong", "sub", "summary", "sup",
+            "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul"}
+_VOID = {"br", "hr", "img", "col"}
+_DROP_WITH_CONTENT = {"script", "style", "noscript", "template", "textarea", "object", "embed", "applet", "title", "head"}
+_OK_ATTRS = {"*": {"class", "title", "lang", "dir"}, "a": {"href", "target", "rel"},
+             "img": {"src", "alt", "width", "height"}, "td": {"colspan", "rowspan", "align"}, "th": {"colspan", "rowspan", "align"},
+             "ol": {"start", "type"}, "iframe": {"src", "width", "height", "allowfullscreen", "title"}, "details": {"open"}}
+_OK_CSS = {"color", "background-color", "text-align", "font-weight", "font-style", "text-decoration"}
+_VIDEO_HOSTS = {"www.youtube.com", "www.youtube-nocookie.com", "player.vimeo.com"}
+
+
+def _safe_url(u, kind):
+    """Return the URL if it is harmless, else None. Control characters are removed first so that
+    tricks like 'java\tscript:' cannot sneak through."""
+    u = html.unescape(u or "").strip()
+    flat = re.sub(r"[\x00-\x20\x7f]+", "", u).lower()
+    if not flat:
+        return None
+    if flat.startswith("#"):
+        return u
+    if flat.startswith("//"):
+        flat = "https:" + flat
+    m = re.match(r"^([a-z][a-z0-9+.-]*):", flat)
+    if not m:
+        return u                                    # relative link
+    scheme = m.group(1)
+    if kind == "href" and scheme in ("http", "https", "mailto", "tel"):
+        return u
+    if kind == "img" and (scheme in ("http", "https") or re.match(r"^data:image/(png|jpe?g|gif|webp);base64,", flat)):
+        return u
+    if kind == "frame" and scheme == "https":
+        host = (urllib.parse.urlsplit(flat).hostname or "")
+        return u if host in _VIDEO_HOSTS else None
+    return None
+
+
+def _safe_css(v):
+    out = []
+    for decl in (v or "").split(";"):
+        if ":" not in decl:
+            continue
+        k, val = decl.split(":", 1)
+        k, val = k.strip().lower(), val.strip()
+        if k in _OK_CSS and re.match(r"^[#\w\s%.,()-]+$", val) and "url(" not in val.lower() and "expression" not in val.lower():
+            out.append(f"{k}:{val}")
+    return ";".join(out)
+
+
+class _Cleaner(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.out, self.stack, self.skip = [], [], 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _DROP_WITH_CONTENT:
+            self.skip += 1
+            return
+        if self.skip or tag not in _OK_TAGS:
+            return
+        keep = []
+        allowed = _OK_ATTRS["*"] | _OK_ATTRS.get(tag, set())
+        for k, v in attrs:
+            k = (k or "").lower()
+            v = v if v is not None else ""
+            if k == "style":
+                v = _safe_css(v)
+                if v:
+                    keep.append(("style", v))
+                continue
+            if k not in allowed:
+                continue
+            if tag == "a" and k == "href":
+                v = _safe_url(v, "href")
+            elif tag == "img" and k == "src":
+                v = _safe_url(v, "img")
+            elif tag == "iframe" and k == "src":
+                v = _safe_url(v, "frame")
+            if v is None:
+                if tag in ("img", "iframe") and k == "src":
+                    return                          # no safe source: drop the whole element
+                continue
+            keep.append((k, v))
+        if tag == "iframe" and not any(k == "src" for k, _ in keep):
+            return
+        if tag == "a":
+            keep = [(k, v) for k, v in keep if k not in ("rel", "target")]
+            if any(k == "href" for k, _ in keep) and not any(v.startswith("#") for k, v in keep if k == "href"):
+                keep += [("target", "_blank"), ("rel", "noopener noreferrer")]
+        attr = "".join(f' {k}="{html.escape(v, quote=True)}"' if v != "" or k not in ("allowfullscreen", "open") else f" {k}" for k, v in keep)
+        self.out.append(f"<{tag}{attr}>")
+        if tag not in _VOID:
+            self.stack.append(tag)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag not in _VOID and tag in self.stack and tag in _OK_TAGS and not self.skip:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        if tag in _DROP_WITH_CONTENT:
+            self.skip = max(0, self.skip - 1)
+            return
+        if self.skip or tag not in _OK_TAGS or tag in _VOID or tag not in self.stack:
+            return
+        while self.stack:
+            t = self.stack.pop()
+            self.out.append(f"</{t}>")
+            if t == tag:
+                break
+
+    def handle_data(self, d):
+        if not self.skip:
+            self.out.append(html.escape(d, quote=False))
+
+    def handle_entityref(self, n):
+        if not self.skip:
+            self.out.append(f"&{n};")
+
+    def handle_charref(self, n):
+        if not self.skip:
+            self.out.append(f"&#{n};")
+
+    def result(self):
+        while self.stack:
+            self.out.append(f"</{self.stack.pop()}>")
+        return "".join(self.out)
+
+
 def sanitize(h):
-    h = re.sub(r"(?is)<script\b.*?</script>", "", h)
-    h = re.sub(r"(?i)\son\w+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", "", h)
-    h = re.sub(r"(?i)(href|src)\s*=\s*([\"'])\s*javascript:[^\"']*\2", r"\1=\2#\2", h)
-    return h
+    """Keep ordinary article markup, remove everything that could run code or hijack the page."""
+    c = _Cleaner()
+    c.feed(h or "")
+    c.close()
+    return c.result()
 
 
 def plain_to_html(t):
@@ -168,6 +306,75 @@ class Article:
     pass
 
 
+def db_settings(cfg):
+    sbc = cfg.get("supabase") or {}
+    url = (os.environ.get("SUPABASE_URL") or sbc.get("url") or "").strip().rstrip("/")
+    key = (os.environ.get("SUPABASE_ANON_KEY") or sbc.get("anon_key") or "").strip()
+    return url, key
+
+
+def db_get(url, key, path, method="GET", body=None, extra=None):
+    """One request to the Supabase REST API, with a few retries. Any failure stops the build on purpose:
+    the previous version of the website then stays online instead of being replaced by one with articles missing."""
+    headers = {"apikey": key, "Accept": "application/json"}
+    if key.startswith("eyJ"):                       # classic keys are JWTs; newer "sb_..." keys go in apikey only
+        headers["Authorization"] = f"Bearer {key}"
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    headers.update(extra or {})
+    last = None
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(url + path, method=method, headers=headers,
+                                         data=None if body is None else json.dumps(body).encode())
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read().decode("utf-8") or "null")
+        except urllib.error.HTTPError as e:
+            last = f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:300]}"
+            if e.code < 500 and e.code != 429:
+                break
+        except (urllib.error.URLError, TimeoutError, ValueError) as e:
+            last = str(e)
+        time.sleep(2 * (attempt + 1))
+    sys.exit(f"Could not read articles from the database ({path}): {last}\n"
+             f"Build stopped so the live site is not replaced by an incomplete one.")
+
+
+def fetch_db(cfg):
+    """Published articles and the ids of every article in the database. Empty when no database is set up."""
+    url, key = db_settings(cfg)
+    if not url or not key:
+        return [], set()
+    rows, start, page = [], 0, 1000
+    while True:
+        chunk = db_get(url, key, "/rest/v1/articles?select=*&order=id",
+                       extra={"Range-Unit": "items", "Range": f"{start}-{start + page - 1}"})
+        rows += chunk or []
+        if not chunk or len(chunk) < page:
+            break
+        start += page
+    ids = db_get(url, key, "/rest/v1/rpc/known_article_ids", method="POST", body={}) or []
+    print(f"Database: {len(rows)} live articles ({len(ids)} in total)")
+    return rows, set(map(str, ids)) | {str(r.get("id")) for r in rows}
+
+
+def normalize_db_row(r):
+    """Make a database row look like a CSV row, so one code path builds articles from both."""
+    out = {}
+    for k, v in r.items():
+        if v is None:
+            out[k] = ""
+        elif isinstance(v, bool):
+            out[k] = "true" if v else "false"
+        elif isinstance(v, (dict, list)):
+            out[k] = json.dumps(v, ensure_ascii=False)
+        else:
+            out[k] = str(v)
+    out["created_date"] = out.get("created_at", "")
+    out["updated_date"] = out.get("updated_at", "")
+    return out
+
+
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
     p = ROOT / "site.json"
@@ -185,92 +392,120 @@ def load_config():
 
 def load_articles(cfg, now):
     files = sorted(p for p in ARTICLES_DIR.rglob("*.csv") if "images" not in p.relative_to(ARTICLES_DIR).parts)
+
+    def iter_rows(cfg):
+        # Database articles first, so they win over a CSV row with the same id.
+        db_rows, known_ids = fetch_db(cfg)
+        for r in db_rows:
+            yield "database", normalize_db_row(r)
+        for f in files:
+            with open(f, encoding="utf-8-sig", newline="") as fh:
+                for row in csv.DictReader(fh):
+                    # An article that lives in the database but is currently hidden there (draft,
+                    # taken down, scheduled for later) must not come back from an old CSV copy.
+                    if (row.get("id") or "").strip() in known_ids:
+                        continue
+                    yield f.name, row
+
     arts, skipped = [], {"draft": 0, "taken_down": 0, "scheduled": 0, "no_title": 0}
     seen_ids = set()
-    for f in files:
-        with open(f, encoding="utf-8-sig", newline="") as fh:
-            for row in csv.DictReader(fh):
-                g = lambda k: (row.get(k) or "").strip()
-                title = clean_title(g("title"))
-                if not title:
-                    skipped["no_title"] += 1
-                    continue
-                if truthy(g("taken_down")):
-                    skipped["taken_down"] += 1
-                    continue
-                status = g("status").lower() or "published"
-                sched = parse_dt(g("scheduled_publish_at"))
-                if status == "scheduled":
-                    if not sched or sched > now:
-                        skipped["scheduled"] += 1
-                        continue
-                elif status != "published":
-                    skipped["draft"] += 1
-                    continue
-                rid = g("id")
-                if rid and rid in seen_ids:
-                    continue
-                seen_ids.add(rid)
+    for srcname, row in iter_rows(cfg):
+        g = lambda k: (row.get(k) or "").strip()
+        title = clean_title(g("title"))
+        if not title:
+            skipped["no_title"] += 1
+            continue
+        if truthy(g("taken_down")):
+            skipped["taken_down"] += 1
+            continue
+        status = g("status").lower() or "published"
+        sched = parse_dt(g("scheduled_publish_at"))
+        if status == "scheduled":
+            if not sched or sched > now:
+                skipped["scheduled"] += 1
+                continue
+        elif status != "published":
+            skipped["draft"] += 1
+            continue
+        rid = g("id")
+        if rid and rid in seen_ids:
+            continue
+        seen_ids.add(rid)
 
-                a = Article()
-                a.src = f.name
-                a.id = rid
-                a.title = title
-                a.subtitle = g("subtitle")
-                a.category = g("category") or "News"
-                a.author = g("author_name")
-                a.date = parse_dt(g("published_at")) or sched or parse_dt(g("created_date")) or now
-                a.updated = parse_dt(g("updated_date"))
-                a.image_raw = g("image_url")
-                a.fx = min(100, max(0, to_int(g("cover_focus_x"), 50)))
-                a.fy = min(100, max(0, to_int(g("cover_focus_y"), 50)))
-                a.extra_images = [u for u in json_list(g("additional_images")) if isinstance(u, str) and u.strip()]
-                a.layout = g("image_layout") or "grid"
-                a.video = g("reporter_video_url")
-                a.breaking = truthy(g("is_breaking"))
-                a.breaking_text = g("breaking_description") or title
-                a.featured = truthy(g("is_featured"))
-                a.views = to_int(g("views"))
-                a.is_live = truthy(g("is_live_update"))
-                a.live_label = g("live_update_label") or "LIVE"
-                a.live_updates = [u for u in json_list(g("live_updates")) if isinstance(u, dict)]
-                a.citations = row.get("citations") or ""
-                a.ai_translated = truthy(g("is_ai_translated"))
-                a.translations = {}
-                try:
-                    tdata = json.loads(g("translations") or "{}")
-                except ValueError:
-                    tdata = {}
-                if isinstance(tdata, dict):
-                    for lang, v in tdata.items():
-                        if isinstance(v, dict) and (v.get("content") or v.get("title")):
-                            a.translations[lang.lower()] = v
-                a.series_id = g("series_id")
-                a.series_order = to_int(g("series_order"))
-                a.verified = truthy(g("author_verified"))
-                ctype = g("content_type").lower()
-                content = row.get("content") or ""
-                a.raw_content = content
-                a.is_embed = ctype in ("html", "interactive") or bool(
-                    re.match(r"\s*<!doctype|\s*<html", content, re.I))
-                if not a.is_embed and not re.search(r"<\w+[^>]*>", content):
-                    content = plain_to_html(content)
-                a.body_html = "" if a.is_embed else sanitize(content)
-                text = strip_tags(content) if not a.is_embed else strip_tags(re.sub(r"(?is)<head.*?</head>", "", content))
-                a.words = len(text.split())
-                a.read_min = max(1, round(a.words / 220))
-                ex = a.subtitle or text
-                a.excerpt = ex if len(ex) <= 170 else ex[:167].rsplit(" ", 1)[0] + "…"
-                a.cat_slug = slugify(a.category)
-                arts.append(a)
+        a = Article()
+        a.src = srcname
+        a.from_db = srcname == "database"
+        a.fixed_slug = slugify(g("slug")) if g("slug") else ""
+        a.id = rid
+        a.title = title
+        a.subtitle = g("subtitle")
+        a.category = g("category") or "News"
+        a.author = g("author_name")
+        a.date = parse_dt(g("published_at")) or sched or parse_dt(g("created_date")) or now
+        a.updated = parse_dt(g("updated_date"))
+        a.image_raw = g("image_url")
+        a.fx = min(100, max(0, to_int(g("cover_focus_x"), 50)))
+        a.fy = min(100, max(0, to_int(g("cover_focus_y"), 50)))
+        a.extra_images = [u for u in json_list(g("additional_images")) if isinstance(u, str) and u.strip()]
+        a.layout = g("image_layout") or "grid"
+        a.video = g("reporter_video_url")
+        a.breaking = truthy(g("is_breaking"))
+        a.breaking_text = g("breaking_description") or title
+        a.featured = truthy(g("is_featured"))
+        a.views = to_int(g("views"))
+        a.is_live = truthy(g("is_live_update"))
+        a.live_label = g("live_update_label") or "LIVE"
+        a.live_updates = [u for u in json_list(g("live_updates")) if isinstance(u, dict)]
+        a.citations = row.get("citations") or ""
+        a.ai_translated = truthy(g("is_ai_translated"))
+        a.translations = {}
+        try:
+            tdata = json.loads(g("translations") or "{}")
+        except ValueError:
+            tdata = {}
+        if isinstance(tdata, dict):
+            for lang, v in tdata.items():
+                if isinstance(v, dict) and (v.get("content") or v.get("title")):
+                    a.translations[lang.lower()] = v
+        a.series_id = g("series_id")
+        a.series_order = to_int(g("series_order"))
+        a.verified = truthy(g("author_verified"))
+        ctype = g("content_type").lower()
+        content = row.get("content") or ""
+        a.raw_content = content
+        # Full-HTML pages run their own scripts, so for database articles only the admin-controlled
+        # content_type may switch that on. A "normal" article is never promoted by what its text looks like.
+        a.is_embed = ctype in ("html", "interactive") or (
+            not a.from_db and bool(re.match(r"\s*<!doctype|\s*<html", content, re.I)))
+        if not a.is_embed and not re.search(r"<\w+[^>]*>", content):
+            content = plain_to_html(content)
+        a.body_html = "" if a.is_embed else sanitize(content)
+        text = strip_tags(content) if not a.is_embed else strip_tags(re.sub(r"(?is)<head.*?</head>", "", content))
+        a.words = len(text.split())
+        a.read_min = max(1, round(a.words / 220))
+        ex = a.subtitle or text
+        a.excerpt = ex if len(ex) <= 170 else ex[:167].rsplit(" ", 1)[0] + "…"
+        a.cat_slug = slugify(a.category)
+        arts.append(a)
 
     arts.sort(key=lambda a: a.date, reverse=True)
+    # Articles saved by the editor keep their slug forever (links never break when a headline changes).
+    taken = {a.fixed_slug for a in arts if a.fixed_slug}
     used = {}
     for a in arts:
+        if a.fixed_slug:
+            a.slug = a.fixed_slug
+            continue
         base = slugify(a.title)
         n = used.get(base, 0)
-        used[base] = n + 1
-        a.slug = base if n == 0 else f"{base}-{n + 1}"
+        while True:
+            cand = base if n == 0 else f"{base}-{n + 1}"
+            n += 1
+            if cand not in taken:
+                break
+        used[base] = n
+        taken.add(cand)
+        a.slug = cand
     return arts, skipped
 
 
@@ -529,7 +764,9 @@ class Site:
             f'<h1>{live}{esc(title)}</h1>'
             f'{"<p class=sub>" + esc(subtitle) + "</p>" if subtitle else ""}'
             f'<p class="byline">{by}<time datetime="{a.date.isoformat()}">{fmt_datetime(a.date)}</time>{upd}'
-            f' · {a.read_min} min read</p></header>')
+            f' · {a.read_min} min read</p>'
+            f'{"<a class=editlink hidden href=" + root + "editor/#/edit/" + esc(a.id) + ">Edit this article</a>" if a.from_db else ""}'
+            f'</header>')
 
         if a.translations:
             pills = f'<a href="{a.slug}.html"{" class=on" if not lang else ""}>Original</a>'
@@ -553,8 +790,8 @@ class Site:
             if m:
                 parts.append(f'<div class="video"><iframe src="https://www.youtube-nocookie.com/embed/{m.group(1)}" '
                              f'allowfullscreen loading="lazy" title="Video"></iframe></div>')
-            else:
-                parts.append(f'<p><a href="{esc(v)}" target="_blank" rel="noopener">Watch video &rsaquo;</a></p>')
+            elif re.match(r"^https?://", v.strip(), re.I):
+                parts.append(f'<p><a href="{esc(v.strip())}" target="_blank" rel="noopener">Watch video &rsaquo;</a></p>')
 
         if a.is_live and a.live_updates:
             ups = sorted(a.live_updates, key=lambda u: u.get("timestamp", ""), reverse=True)
@@ -657,6 +894,14 @@ def main():
         shutil.copytree(img_dir, OUT / "images")
 
     w = lambda p, s: (OUT / p).write_text(s, encoding="utf-8")
+    ed = ROOT / "editor" / "index.html"
+    if ed.exists():
+        (OUT / "editor").mkdir()
+        url, key = db_settings(cfg)
+        conf = json.dumps({"url": url, "anon_key": key}).replace("</", "<\\/")
+        page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
+                .replace("{{CSS_VER}}", asset_ver("editor.css")).replace("{{JS_VER}}", asset_ver("editor.js")))
+        w("editor/index.html", page)
     w("index.html", site.home())
     w("search.html", site.search_page())
     for slug, c in site.cats.items():

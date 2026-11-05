@@ -1,0 +1,27 @@
+name: Import articles into the database
+
+# Run this once (Actions tab > "Import articles into the database" > Run workflow) to copy the articles from
+# a CSV file into the online editor's database. It needs the repository secret SUPABASE_SERVICE_KEY.
+on:
+  workflow_dispatch:
+    inputs:
+      csv:
+        description: "CSV file to import (path inside this repository)"
+        default: "articles/articles-2026-10-export.csv"
+
+permissions:
+  contents: read
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Import
+        env:
+          CSV: ${{ inputs.csv }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python tools/import_csv.py "$CSV"
