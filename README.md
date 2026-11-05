@@ -8,7 +8,7 @@ Live site (after enabling Pages, see below): https://victor-stanovoy.github.io/n
 
 The editor lives at **https://victor-stanovoy.github.io/news/editor/**. People sign in, write articles in a rich-text editor
 (headline, photos, sections, translations, scheduling, live pages) and press **Publish**. The website rebuilds itself and the
-article is online a minute or two later. Articles are stored in a free [Supabase](https://supabase.com) database.
+article is online about a minute later (after the one-time step *Update the website right after publishing*, below). Articles are stored in a free [Supabase](https://supabase.com) database.
 
 **Roles** (an admin gives these out in the editor's **Team** panel):
 
@@ -46,8 +46,7 @@ article is online a minute or two later. Articles are stored in a free [Supabase
 - **Where articles come from.** Database articles and CSV files in `articles/` are combined. If the same article is in both, the database wins.
   An article you hide in the editor (draft, taken down, scheduled) never reappears from an old CSV.
 - **Safe by design.** If the database cannot be reached while the site builds, the build stops and the live site stays as it was.
-- **Faster updates (optional).** Without extras the site rebuilds on every push and once an hour. For an instant rebuild after each Publish, follow the
-  comment at the end of `supabase/schema.sql` (a GitHub token stored in the database, never visible to the website).
+- **Updating the website.** Publishing saves the article in the database. The website itself is rebuilt when a push happens, once an hour, or when the database tells GitHub to rebuild (set up below). The **Update website** button in the editor does the same by hand. Scheduled articles go live at the next rebuild.
 - **Images** uploaded in the editor are stored in Supabase (free plan: 1 GB). Images from other websites can be used by address.
 - **Signed-in editors** see an **Edit this article** button on every article page.
 - **Slugs.** An article's web address is created when it is first saved and never changes, even if the headline is edited.
@@ -56,6 +55,19 @@ article is online a minute or two later. Articles are stored in a free [Supabase
   Visitors can only read published articles. Everything is enforced by rules inside the database, not just by the editor page.
 - **"permission denied for table articles"** in a failed build means the database has not got the latest permissions: paste the current `supabase/schema.sql` into the SQL Editor and Run it again, then re-run the failed build in the Actions tab.
 - **If a build fails** with "Could not read articles from the database", check that `site.json` has the right URL and key and that the Supabase project is not paused (free projects pause after a week of no use).
+
+### Update the website right after publishing (one-time, about 5 minutes)
+
+Without this, a published article appears on the site only at the next hourly rebuild (GitHub does not always run it on time).
+
+1. On GitHub open **Settings (your profile) > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token**.
+   Name it `sparknews-rebuild`, pick an expiry (one year), **Only select repositories > news**, and under **Repository permissions** set **Actions: Read and write**. Nothing else. Generate and copy the token (`github_pat_...`).
+2. Open `supabase/instant-rebuild.sql`, replace `PASTE_TOKEN_HERE` with the token (keep the quotes), copy the whole file into Supabase **SQL Editor > New query > Run**. Do not commit the edited file.
+3. Open the editor and press **Update website**. It should say the update started; the **Actions** tab shows a new run. After a minute the site is updated (do a hard refresh, Ctrl+Shift+R, because GitHub Pages caches for a few minutes).
+4. From now on every publish, edit, unpublish or take-down starts a rebuild by itself. Drafts do not.
+5. Set a reminder for the token's expiry day: make a new token and run the file again with it (the old one is replaced).
+
+If nothing happens, run `select status_code, content from net._http_response order by id desc limit 5;` in the SQL Editor. 204 means GitHub accepted it; 401/403/404 means the token is wrong, expired, or lacks *Actions: Read and write* on `news`.
 
 ## Adding articles with CSV files
 

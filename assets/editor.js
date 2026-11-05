@@ -11,7 +11,7 @@
 
   var sb = null, me = { id: '', email: '', role: '', name: '' };
   var articles = [], current = null, form = null, quill = null;
-  var dirty = false, filter = 'all', query = '', saving = false;
+  var dirty = false, filter = 'all', query = '', saving = false, rebuildReady = false;
 
   /* ---------------------------------------------------------------- tiny helpers */
   function h(tag, attrs) {
@@ -151,7 +151,10 @@
       if (r.error) return renderLogin('Could not check your access: ' + r.error.message);
       if (!r.data) return renderNoAccess();
       me.role = r.data.role; me.name = r.data.name || '';
-      loadArticles().then(renderWork);
+      Promise.all([loadArticles(), sb.rpc('rebuild_configured')]).then(function (res) {
+        rebuildReady = !res[1].error && res[1].data === true;   /* false when instant updates are not set up */
+        renderWork();
+      });
     });
   }
 
@@ -208,6 +211,7 @@
         'SparkNews', h('small', { text: 'Editor' })),
       h('span', { class: 'sp' }),
       h('span', { class: 'who' }, me.name || me.email, h('b', { text: me.role })),
+      canPublish() ? h('button', { class: 'lnk', type: 'button', text: 'Update website', onclick: updateSite }) : null,
       me.role === 'admin' ? h('button', { class: 'lnk', type: 'button', text: 'Team', onclick: openTeam }) : null,
       h('a', { class: 'lnk', href: '../index.html', target: '_blank', text: 'View site' }),
       h('button', { class: 'lnk', type: 'button', text: 'Password', onclick: function () { guard(function () { renderPassword(false); }); } }),
@@ -263,6 +267,15 @@
       if (r.error) return toast(r.error.message, true);
       if (!r.data) { toast('Article not found, or you are not allowed to open it', true); location.hash = ''; return; }
       showForm(r.data);
+    });
+  }
+
+  /* ---------------------------------------------------------------- update the website */
+  function updateSite() {
+    sb.rpc('rebuild_site').then(function (r) {
+      if (r.error) return toast(errText(r.error), true);
+      if (r.data === 'started') { rebuildReady = true; toast('Website update started. It is online in about a minute; then refresh the page.'); }
+      else toast('Instant updates are not set up yet, so the website cannot be told to update. See "Update the website right after publishing" in the README.', true);
     });
   }
 
@@ -510,7 +523,9 @@
         dirty = false; dirtyEl.textContent = '';
         var row = r.data, i = articles.findIndex(function (x) { return x.id === row.id; });
         if (i >= 0) articles[i] = row; else articles.unshift(row);
-        toast(d.status === 'published' ? 'Saved. The website updates within a minute or two.' : 'Saved');
+        var live = d.status === 'published' || d.status === 'scheduled' || a.status === 'published';
+        toast(!live ? 'Saved' : rebuildReady ? 'Saved. The website updates in about a minute.'
+          : canPublish() ? 'Saved. It is not on the website yet: press "Update website" (top right).' : 'Saved');
         current = row;
         if (!a.id) history.replaceState(null, '', '#/edit/' + encodeURIComponent(row.id));
         showForm(row);

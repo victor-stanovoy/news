@@ -188,34 +188,4 @@ drop policy if exists "images: staff upload" on storage.objects;
 create policy "images: staff upload" on storage.objects for insert to authenticated
   with check (bucket_id = 'images' and public.editor_role() is not null);
 
--- ---------------------------------------------------------------- OPTIONAL: rebuild the website whenever a live article changes
--- Without this the site still rebuilds every hour. To make it instant, run the block below once, after
--- replacing PASTE_GITHUB_TOKEN with a fine-grained GitHub token limited to the "news" repository with
--- "Contents: Read and write" permission. The token is stored in a table that browsers cannot read.
-create table if not exists public.app_secrets (key text primary key, value text not null);
-alter table public.app_secrets enable row level security;   -- no policies = invisible to the website and the editor
-revoke all on public.app_secrets from anon, authenticated;
-
-create or replace function public.notify_rebuild()
-returns trigger language plpgsql security definer set search_path = public, extensions as $$
-declare tok text; st_old text; st_new text;
-begin
-  select value into tok from public.app_secrets where key = 'github_token';
-  if tok is null or tok = '' or tok = 'PASTE_GITHUB_TOKEN' then return null; end if;
-  if tg_op <> 'INSERT' then st_old := old.status; end if;
-  if tg_op <> 'DELETE' then st_new := new.status; end if;
-  if coalesce(st_old, '') in ('published', 'scheduled') or coalesce(st_new, '') in ('published', 'scheduled') then
-    perform net.http_post(
-      url     := 'https://api.github.com/repos/victor-stanovoy/news/dispatches',
-      headers := jsonb_build_object('Authorization', 'Bearer ' || tok, 'Accept', 'application/vnd.github+json',
-                                    'User-Agent', 'sparknews-db', 'Content-Type', 'application/json'),
-      body    := '{"event_type":"articles-changed"}'::jsonb);
-  end if;
-  return null;
-end $$;
-
--- uncomment the next two lines (and put in your token) to switch the instant rebuild on:
--- create extension if not exists pg_net with schema extensions;
--- insert into public.app_secrets (key, value) values ('github_token', 'PASTE_GITHUB_TOKEN') on conflict (key) do update set value = excluded.value;
--- drop trigger if exists articles_rebuild on public.articles;
--- create trigger articles_rebuild after insert or update or delete on public.articles for each row execute function public.notify_rebuild();
+-- Want the website to update the moment someone presses Publish? Run supabase/instant-rebuild.sql as well (see the README).
