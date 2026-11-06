@@ -60,14 +60,34 @@ article is online about a minute later (after the one-time step *Update the webs
 
 Without this, a published article appears on the site only at the next hourly rebuild (GitHub does not always run it on time).
 
-1. On GitHub open **Settings (your profile) > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token**.
-   Name it `sparknews-rebuild`, pick an expiry (one year), **Only select repositories > news**, and under **Repository permissions** set **Actions: Read and write**. Nothing else. Generate and copy the token (`github_pat_...`).
-2. Open `supabase/instant-rebuild.sql`, replace `PASTE_TOKEN_HERE` with the token (keep the quotes), copy the whole file into Supabase **SQL Editor > New query > Run**. Do not commit the edited file.
-3. Open the editor and press **Update website**. It should say the update started; the **Actions** tab shows a new run. After a minute the site is updated (do a hard refresh, Ctrl+Shift+R, because GitHub Pages caches for a few minutes).
-4. From now on every publish, edit, unpublish or take-down starts a rebuild by itself. Drafts do not.
-5. Set a reminder for the token's expiry day: make a new token and run the file again with it (the old one is replaced).
+1. Open https://github.com/settings/personal-access-tokens/new. Name: `SparkNews rebuild`. Expiration: 1 year. **Repository access: Only select repositories > news.**
+   Under **Repository permissions** add **Actions** and set it to **Read and write**. Leave all else. **Generate token** and copy it (starts with `github_pat_`; shown once).
+2. In Supabase **SQL Editor > New query**, paste the whole file `supabase/instant-rebuild.sql` **unchanged** and press **Run** (it must say Success).
+3. New query, paste this with your token instead of the dots, **Run** (it must say *1 row affected*):
+   ```sql
+   update public.app_secrets set value = 'github_pat_...' where key = 'github_token';
+   ```
+4. Open the editor and press **Update website**. It says the update started; the **Actions** tab shows a new run. A minute later refresh the site with Ctrl+Shift+R (GitHub Pages caches for a few minutes).
+5. From now on every publish, edit, unpublish or take-down starts a rebuild by itself. Drafts do not. Set a reminder for the token's expiry day: make a new token and repeat step 3.
 
-If nothing happens, run `select status_code, content from net._http_response order by id desc limit 5;` in the SQL Editor. 204 means GitHub accepted it; 401/403/404 means the token is wrong, expired, or lacks *Actions: Read and write* on `news`.
+If nothing happens run `select status_code, content from net._http_response order by id desc limit 5;`. 204 = accepted. 401/403/404 = wrong or expired token, or it lacks *Actions: Read and write* on `news`.
+
+## Live radio and live TV (LiveKit)
+
+Editors and admins press **Go live** in the editor, pick Radio and/or TV and start broadcasting from the browser (microphone, camera or screen).
+Visitors open the **Live** page of the website (a menu link that pulses red while something is on air) and press Listen / Watch. No login is needed to watch.
+A broadcast goes off air by itself about a minute after the editor page is closed. Streaming goes through [LiveKit Cloud](https://livekit.io) (a free plan exists; check their limits).
+
+One-time setup (about 15 minutes):
+
+1. **LiveKit project.** Sign up at cloud.livekit.io and create a project. In **Settings > Keys** create an API key. Note three values: the **URL** (`wss://....livekit.cloud`), the **API key** and the **API secret**.
+2. **Database part.** Supabase **SQL Editor > New query**, paste `supabase/live.sql`, **Run**.
+3. **Token function.** Supabase **Edge Functions > Deploy a new function > Via Editor**. Name it exactly `livekit-token`, paste the whole file `supabase/functions/livekit-token/index.ts`, and **turn OFF "Verify JWT"** (the function checks who is asking itself). Deploy.
+4. **Secrets.** Supabase **Edge Functions > Secrets**, add `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` with the three values from step 1. The secret never reaches the website; browsers only get short-lived tokens (publishing: signed-in admins and editors only; watching: anyone, only while on air).
+5. Open the editor, press **Go live**, enter a title, **Start broadcast**, allow the microphone. Then open the website's **Live** page in another tab and press Listen.
+6. If you do not want the Live page, set `"live": {"enabled": false}` in `site.json`.
+
+Tips: use headphones while testing so the radio does not echo into your microphone. Keep the editor page open while broadcasting.
 
 ## Adding articles with CSV files
 

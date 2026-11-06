@@ -57,6 +57,7 @@ DEFAULT_CONFIG = {
     "nav_max": 8,                   # sections shown in the menu; the rest go under "More"
     "nav_order": [],                # optional: categories listed first in the menu
     "footer_text": "",
+    "live": {"enabled": True},      # "Live" page for live radio and TV (needs the database and supabase/live.sql)
     "supabase": {"url": "", "anon_key": ""},   # the editor and database; both values are safe to publish
     "ticker": {
         "enabled": True,            # scrolling headline bar under the menu
@@ -587,6 +588,23 @@ class Site:
                 f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}<link rel="icon" href="{icon}">'
                 f'<link rel="stylesheet" href="{root}assets/style.css?v={asset_ver("style.css")}"></head>')
 
+    def live_on(self):
+        return bool(self.cfg["live"].get("enabled")) and bool(db_settings(self.cfg)[0])
+
+    def live_page(self):
+        url, key = db_settings(self.cfg)
+        conf = json.dumps({"url": url, "anon_key": key}).replace("</", "<\\/")
+        card = lambda kind, name, verb, el: (
+            f'<section class="livecard" data-kind="{kind}"><div class="lhead"><h2>{name}</h2>'
+            f'<span class="lstate off">Off air</span></div><p class="ltitle">Not broadcasting right now.</p>'
+            f'{el}<button class="lbtn" type="button" hidden>{verb}</button><p class="lmsg" role="status"></p></section>')
+        body = (f'<div class="wrap live"><h1>Live</h1><p class="lead">Live radio and TV from {esc(self.cfg["site_name"])}.</p>'
+                f'<div class="livegrid">{card("radio", "Live radio", "&#9654; Listen live", "<audio class=lmedia controls hidden></audio>")}'
+                f'{card("tv", "Live TV", "&#9654; Watch live", "<video class=lmedia controls playsinline hidden></video>")}</div>'
+                f'<script id="spark-live-config" type="application/json">{conf}</script>'
+                f'<script src="../assets/live.js?v={asset_ver("live.js")}" defer></script></div>')
+        return self.page("Live", body, "../", active="live")
+
     def header(self, root, active=""):
         cfg = self.cfg
         links = [
@@ -605,12 +623,14 @@ class Site:
             more_on = " on" if any("class=on" in l for l in links[n:]) else ""
             nav += (f'<details class="more"><summary class="{more_on.strip()}">More</summary>'
                     f'<div class="morep wrap">{"".join(links[n:])}</div></details>')
+        livelink = (f'<a class="livelink{" on" if active == "live" else ""}" href="{root}live/index.html"><i></i>Live</a>'
+                    if self.live_on() else "")
         return f'''<body><a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="wrap bar">
 {logo}
 <div class="tools"><form class="search" action="{root}search.html" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"><button aria-label="Search">&#9906;</button></form><button class="theme" type="button" aria-label="Switch light / dark mode" title="Light / dark"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M12 3.5a8.5 8.5 0 0 1 0 17z"/></svg></button></div>
 </div>
-<nav class="wrap menu" aria-label="Sections"><a href="{root}index.html"{" class=on" if active == "" else ""}>Home</a>{nav}</nav></header>'''
+<nav class="wrap menu" aria-label="Sections"><a href="{root}index.html"{" class=on" if active == "" else ""}>Home</a>{livelink}{nav}</nav></header>'''
 
     def footer(self, root):
         cfg = self.cfg
@@ -649,6 +669,9 @@ class Site:
     def scripts(self, root):
         t = self.cfg["ticker"]
         data = {"items": [x for x, _ in self.ticker_entries(root)], "tab": t["tab"]}
+        if self.live_on():
+            u, k = db_settings(self.cfg)
+            data["live"] = {"url": u, "key": k}
         blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
         return (f'<script id="spark-ticker-data" type="application/json">{blob}</script>'
                 f'<script src="{root}assets/site.js?v={asset_ver("site.js")}" defer></script>')
@@ -920,6 +943,9 @@ def main():
         w("editor/index.html", page)
     w("index.html", site.home())
     w("search.html", site.search_page())
+    if site.live_on():
+        (OUT / "live").mkdir()
+        w("live/index.html", site.live_page())
     for slug, c in site.cats.items():
         w(f"c/{slug}.html", site.category(slug, c))
     for a in arts:

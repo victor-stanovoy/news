@@ -19,6 +19,21 @@ window.addEventListener('error', function (e) { window.__sparkErrors.push(e.mess
     if (signedIn) document.querySelectorAll('.editlink').forEach(function (a) { a.hidden = false; });
   } catch (e) {}
 
+  /* ---- red dot on the "Live" menu link while radio or TV is on air ---- */
+  try {
+    var ll = document.querySelector('.livelink'), td = document.getElementById('spark-ticker-data');
+    var lc = td && JSON.parse(td.textContent).live;
+    if (ll && lc && lc.url) {
+      var poll = function () {
+        fetch(lc.url.replace(/\/+$/, '') + '/rest/v1/live_now?select=kind', { headers: { apikey: lc.key } })
+          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (rows) { ll.classList.toggle('onair', Array.isArray(rows) && rows.length > 0); })
+          .catch(function () {});
+      };
+      poll(); setInterval(poll, 30000);
+    }
+  } catch (e) {}
+
   /* ---- light / dark toggle (remembers the choice) ---- */
   var tb = document.querySelector('.theme');
   if (tb) {

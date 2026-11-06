@@ -3,11 +3,9 @@
 -- Without this file the site only rebuilds when code is pushed to GitHub (and on an unreliable timer), so a published
 -- article could take hours to appear. With it, the database asks GitHub to rebuild the site within seconds.
 --
--- BEFORE RUNNING: replace PASTE_TOKEN_HERE (line marked <<<) with a GitHub token that may ONLY start workflows:
---   GitHub > your profile picture > Settings > Developer settings > Personal access tokens > Fine-grained tokens
---   > Generate new token. Name: SparkNews rebuild. Expiration: the longest offered. Repository access: Only select
---   repositories > "news". Repository permissions > Actions: Read and write (leave everything else at "No access").
---   Generate, copy the token (it starts with github_pat_) and paste it below.
+-- Run this file as it is (do not edit it). Then save your GitHub token with one separate line (see the README):
+--   update public.app_secrets set value = 'github_pat_...' where key = 'github_token';
+--   The token must be a fine-grained token for the repository "news" with Actions: Read and write, nothing else.
 -- The token is kept in a table the website and the editor cannot read. Safe to run again: it never overwrites a
 -- saved token with the placeholder.
 

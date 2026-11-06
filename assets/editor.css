@@ -119,3 +119,10 @@ dialog.small{height:fit-content;max-height:86vh;width:min(620px,94vw)}
   .head h2{display:none}.head{justify-content:flex-end}
   .trow{grid-template-columns:1fr 100px}.trow .btn{grid-column:1/-1}
 }
+.livebody{padding:14px 16px 18px;display:grid;gap:16px}
+.livebody .hint{margin:0;color:var(--muted);font-size:13px}
+.livepanel{display:grid;gap:10px;padding:12px;border:1px solid var(--line);border-radius:10px}
+.livepanel h3{margin:0}
+.livepanel .hint.onair{color:var(--bad);font-weight:700}
+.livepreview{width:100%;max-height:220px;background:#000;border-radius:8px}
+.live-btn{color:var(--bad);font-weight:700}

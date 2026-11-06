@@ -211,6 +211,7 @@
         'SparkNews', h('small', { text: 'Editor' })),
       h('span', { class: 'sp' }),
       h('span', { class: 'who' }, me.name || me.email, h('b', { text: me.role })),
+      canPublish() ? h('button', { class: 'lnk live-btn', type: 'button', text: 'Go live', onclick: openLive }) : null,
       canPublish() ? h('button', { class: 'lnk', type: 'button', text: 'Update website', onclick: updateSite }) : null,
       me.role === 'admin' ? h('button', { class: 'lnk', type: 'button', text: 'Team', onclick: openTeam }) : null,
       h('a', { class: 'lnk', href: '../index.html', target: '_blank', text: 'View site' }),
@@ -277,6 +278,98 @@
       if (r.data === 'started') { rebuildReady = true; toast('Website update started. It is online in about a minute; then refresh the page.'); }
       else toast('Instant updates are not set up yet, so the website cannot be told to update. See "Update the website right after publishing" in the README.', true);
     });
+  }
+
+  /* ---------------------------------------------------------------- live radio and TV (LiveKit) */
+  var onAir = { radio: null, tv: null };          /* kind -> { room, timer } while broadcasting */
+  var lkLoading = null;
+  function loadLiveKit() {
+    if (window.LivekitClient) return Promise.resolve();
+    if (!lkLoading) lkLoading = new Promise(function (ok, no) {
+      var el = document.createElement('script'); el.src = '../assets/vendor/livekit-client.umd.js';
+      el.onload = ok; el.onerror = function () { lkLoading = null; no(new Error('Could not load the live video library')); };
+      document.head.appendChild(el);
+    });
+    return lkLoading;
+  }
+  function liveToken(kind) {
+    return sb.auth.getSession().then(function (s) {
+      var tok = s.data && s.data.session && s.data.session.access_token;
+      return fetch(cfg.url.replace(/\/+$/, '') + '/functions/v1/livekit-token', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.anon_key, Authorization: 'Bearer ' + tok },
+        body: JSON.stringify({ kind: kind, mode: 'publish' })
+      });
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) throw new Error(j.error || (r.status === 404 ? 'The live function is not set up yet. See "Live radio and TV" in the README.' : 'Could not start (error ' + r.status + ')'));
+        return j;
+      });
+    });
+  }
+  function stopLive(kind) {
+    var cur = onAir[kind]; if (!cur) return Promise.resolve();
+    onAir[kind] = null; clearInterval(cur.timer);
+    try { cur.room.disconnect(); } catch (e) { /* already gone */ }
+    return sb.rpc('live_set', { p_kind: kind, p_title: null, p_on: false });
+  }
+  function startLive(kind, title, source, preview) {
+    var LK = window.LivekitClient;
+    return liveToken(kind).then(function (t) {
+      var room = new LK.Room();
+      return room.connect(t.url, t.token).then(function () {
+        room.on(LK.RoomEvent.LocalTrackPublished, function (pub) {
+          if (pub.track && pub.track.kind === 'video' && preview) pub.track.attach(preview);
+        });
+        room.on(LK.RoomEvent.Disconnected, function () { if (onAir[kind] && onAir[kind].room === room) stopLive(kind).then(function () { toast('The ' + kind + ' broadcast lost its connection and went off air', true); }); });
+        var lp = room.localParticipant;
+        var steps = [lp.setMicrophoneEnabled(true)];
+        if (kind === 'tv') steps.push(source === 'screen' ? lp.setScreenShareEnabled(true) : lp.setCameraEnabled(true));
+        return Promise.all(steps).then(function () {
+          return sb.rpc('live_set', { p_kind: kind, p_title: title, p_on: true });
+        }).then(function (r) {
+          if (r.error) throw r.error;
+          onAir[kind] = { room: room, timer: setInterval(function () { sb.rpc('live_beat', { p_kind: kind }); }, 30000) };
+        }).catch(function (e) { try { room.disconnect(); } catch (x) { /* ignore */ } throw e; });
+      });
+    });
+  }
+  window.addEventListener('beforeunload', function (e) { if (onAir.radio || onAir.tv) { e.preventDefault(); e.returnValue = ''; } });
+
+  function openLive() {
+    var body = h('div', { class: 'livebody' });
+    var dlg = h('dialog', { class: 'small' }, h('header', {}, h('b', { text: 'Go live' }),
+      h('button', { class: 'btn', type: 'button', text: 'Close', onclick: function () { dlg.close(); dlg.remove(); } })), body);
+    document.body.appendChild(dlg); dlg.showModal();
+
+    function panel(kind) {
+      var title = h('input', { type: 'text', placeholder: kind === 'radio' ? 'e.g. Morning bulletin' : 'e.g. Evening news', maxlength: '120' });
+      var source = kind === 'tv' ? h('select', {}, h('option', { value: 'camera', text: 'Camera and microphone' }), h('option', { value: 'screen', text: 'Screen share and microphone' })) : null;
+      var preview = kind === 'tv' ? h('video', { class: 'livepreview', muted: true, autoplay: true, playsinline: true }) : null;
+      if (preview) preview.muted = true;
+      var status = h('p', { class: 'hint' });
+      var go = h('button', { class: 'btn primary', type: 'button' });
+      function paint() {
+        var live = !!onAir[kind];
+        go.textContent = live ? 'Stop broadcast' : 'Start broadcast'; go.className = 'btn ' + (live ? 'danger' : 'primary');
+        title.disabled = live; if (source) source.disabled = live;
+        status.textContent = live ? 'ON AIR now. Keep this page open while you broadcast.' : 'Off air.';
+        status.className = 'hint' + (live ? ' onair' : '');
+      }
+      go.onclick = function () {
+        go.disabled = true;
+        if (onAir[kind]) return stopLive(kind).then(function () { if (preview) preview.srcObject = null; toast('Off air'); paint(); go.disabled = false; });
+        status.textContent = 'Starting… allow the microphone' + (kind === 'tv' ? (source.value === 'screen' ? ' and pick a screen' : ' and camera') : '') + ' if your browser asks.';
+        loadLiveKit().then(function () { return startLive(kind, title.value.trim(), source && source.value, preview); })
+          .then(function () { toast('You are on air'); })
+          .catch(function (e) { toast(errText(e), true); })
+          .then(function () { paint(); go.disabled = false; });
+      };
+      paint();
+      return h('section', { class: 'livepanel' }, h('h3', { text: kind === 'radio' ? 'Live radio' : 'Live TV' }),
+        field('Title', title), source ? field('Source', source) : null, preview, status, go);
+    }
+    body.appendChild(h('p', { class: 'hint', text: 'Visitors see what is on air on the Live page of the website. A broadcast ends by itself about a minute after this page is closed.' }));
+    body.appendChild(panel('radio')); body.appendChild(panel('tv'));
   }
 
   /* ---------------------------------------------------------------- team panel (admins) */

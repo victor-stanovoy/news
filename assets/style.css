@@ -209,3 +209,17 @@ a:hover>.thumb img,a:hover .thumb img{transform:scale(1.045)}
 .editlink{display:inline-block;margin-top:10px;font-size:13px;font-weight:700;border:1px solid var(--line);padding:4px 12px;border-radius:999px;color:var(--accent)}
 .editlink[hidden]{display:none}
 .editlink:hover{background:var(--soft)}
+/* live radio / tv */
+.livelink i{display:inline-block;width:8px;height:8px;border-radius:50%;background:#7a828e;margin-right:6px}
+.livelink.onair{color:#fff}.livelink.onair i{background:#ff2d2d;animation:livepulse 1.2s infinite}
+@keyframes livepulse{50%{opacity:.25}}
+.live{padding:28px 0 48px}.live h1{margin:0 0 4px}.live .lead{color:var(--muted);margin:0 0 20px}
+.livegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:18px}
+.livecard{border:1px solid var(--line);border-radius:var(--radius);padding:16px;background:var(--soft);min-width:0}
+.lhead{display:flex;align-items:center;justify-content:space-between;gap:10px}.lhead h2{margin:0;font-size:20px}
+.lstate{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:99px;background:var(--line);color:var(--muted)}
+.lstate.on{background:#d71920;color:#fff}
+.ltitle{margin:10px 0}.lmedia{width:100%;margin:8px 0;border-radius:8px;background:#000}audio.lmedia{background:none}
+.lbtn{font:inherit;font-weight:700;padding:10px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}
+.lmsg{color:var(--muted);font-size:14px;min-height:1.2em;margin:8px 0 0}
+@media (max-width:430px){.bar{gap:8px}.search input{width:72px;padding-left:12px}.search button{padding:0 10px}.logo{min-width:0}.tools{gap:6px;flex-shrink:0}}
