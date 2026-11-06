@@ -11,7 +11,7 @@
 
   var sb = null, me = { id: '', email: '', role: '', name: '' };
   var articles = [], current = null, form = null, quill = null;
-  var dirty = false, filter = 'all', query = '', saving = false, rebuildReady = false;
+  var dirty = false, filter = 'all', query = '', saving = false, rebuildReady = false, view = '', stage = null, tabsEl = null, dashCleanup = null;
 
   /* ---------------------------------------------------------------- tiny helpers */
   function h(tag, attrs) {
@@ -164,7 +164,7 @@
       h('p', { text: 'You are signed in as ' + me.email + ', but this account has not been given a role yet. Ask an admin to add this email in the Team panel, then reload this page.' }),
       h('button', { class: 'btn wide', text: 'Sign out', onclick: signOut }))));
   }
-  function signOut() { sb.auth.signOut().then(function () { articles = []; current = null; renderLogin(); }); }
+  function signOut() { stopLive('radio'); stopLive('tv'); view = ''; sb.auth.signOut().then(function () { articles = []; current = null; renderLogin(); }); }
 
   /* ---------------------------------------------------------------- data */
   function loadArticles() {
@@ -211,14 +211,34 @@
         'SparkNews', h('small', { text: 'Editor' })),
       h('span', { class: 'sp' }),
       h('span', { class: 'who' }, me.name || me.email, h('b', { text: me.role })),
-      canPublish() ? h('button', { class: 'lnk live-btn', type: 'button', text: 'Go live', onclick: openLive }) : null,
       canPublish() ? h('button', { class: 'lnk', type: 'button', text: 'Update website', onclick: updateSite }) : null,
       me.role === 'admin' ? h('button', { class: 'lnk', type: 'button', text: 'Team', onclick: openTeam }) : null,
       h('a', { class: 'lnk', href: '../index.html', target: '_blank', text: 'View site' }),
       h('button', { class: 'lnk', type: 'button', text: 'Password', onclick: function () { guard(function () { renderPassword(false); }); } }),
       h('button', { class: 'lnk', type: 'button', text: 'Sign out', onclick: function () { guard(signOut); } }));
 
-    var search = h('input', { type: 'text', placeholder: 'Search articles', 'aria-label': 'Search articles', oninput: function () { query = search.value.toLowerCase(); renderList(); } });
+    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv']] : []);
+    tabsEl = h('nav', { class: 'tabs', 'aria-label': 'Workspaces' }, windows.map(function (w) {
+      return h('button', { class: 'tab', type: 'button', 'data-v': w[0], onclick: function () { guard(function () { if (location.hash === w[2] || (w[0] === 'articles' && !location.hash)) route(); else location.hash = w[2]; }); } },
+        w[1], w[0] === 'radio' || w[0] === 'tv' ? h('i', { class: 'dot', title: 'On air' }) : null);
+    }));
+    stage = h('div', { class: 'stage' });
+    app.replaceChildren(h('div', { class: 'chrome' }, bar, tabsEl), stage);
+    view = '';
+    route();
+  }
+
+  function paintTabs() {
+    if (!tabsEl) return;
+    tabsEl.querySelectorAll('.tab').forEach(function (t) {
+      t.classList.toggle('on', t.dataset.v === view);
+      var d = t.querySelector('.dot'); if (d) d.classList.toggle('live', !!onAir[t.dataset.v]);
+    });
+  }
+
+  function mountArticles() {
+    if (dashCleanup) { dashCleanup(); dashCleanup = null; }
+    var search = h('input', { type: 'text', placeholder: 'Search articles', 'aria-label': 'Search articles', value: query, oninput: function () { query = search.value.toLowerCase(); renderList(); } });
     var chips = h('div', { class: 'chips' });
     [['all', 'All'], ['draft', 'Drafts'], ['published', 'Published'], ['scheduled', 'Scheduled']].forEach(function (f) {
       chips.appendChild(h('button', { class: 'chip' + (filter === f[0] ? ' on' : ''), type: 'button', text: f[1], 'data-f': f[0],
@@ -228,9 +248,9 @@
     var side = h('aside', { class: 'side' },
       h('div', { class: 'tools' }, h('button', { class: 'btn primary', type: 'button', text: '+ New article', onclick: function () { guard(function () { location.hash = '#/new'; }); } }), search, chips), listEl);
     mainEl = h('main', { class: 'main' });
-    app.replaceChildren(bar, h('div', { class: 'work' }, side, mainEl));
+    stage.replaceChildren(h('div', { class: 'work' }, side, mainEl));
+    view = 'articles';
     renderList();
-    route();
   }
 
   function renderList() {
@@ -254,6 +274,15 @@
   window.addEventListener('hashchange', function () { if (me.role) route(); });
 
   function route() {
+    var dm = location.hash.match(/^#\/(radio|tv)$/);
+    if (dm) {
+      if (!canPublish()) { location.hash = ''; return; }
+      if (dashCleanup) { dashCleanup(); dashCleanup = null; }
+      current = null; dirty = false; view = dm[1];
+      stage.replaceChildren(showDash(dm[1])); paintTabs(); return;
+    }
+    if (view !== 'articles') mountArticles();
+    paintTabs();
     var m = location.hash.match(/^#\/edit\/(.+)$/);
     if (m) return openArticle(decodeURIComponent(m[1]));
     if (location.hash === '#/new') return showForm({ status: 'draft', content_type: 'rich', category: '', author_name: me.name || '' });
@@ -308,68 +337,150 @@
   }
   function stopLive(kind) {
     var cur = onAir[kind]; if (!cur) return Promise.resolve();
-    onAir[kind] = null; clearInterval(cur.timer);
+    onAir[kind] = null; clearInterval(cur.timer); clearInterval(cur.clock);
+    if (cur.stopMeter) cur.stopMeter();
     try { cur.room.disconnect(); } catch (e) { /* already gone */ }
+    paintTabs();
     return sb.rpc('live_set', { p_kind: kind, p_title: null, p_on: false });
   }
-  function startLive(kind, title, source, preview) {
+  var RES = { '360': [640, 360], '720': [1280, 720], '1080': [1920, 1080] };
+  function startMeter(stream, el) {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC || !stream || !el) return function () {};
+    var ctx, src, an, on = true, raf, buf;
+    try { ctx = new AC(); src = ctx.createMediaStreamSource(stream); an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an); buf = new Uint8Array(an.fftSize); } catch (e) { return function () {}; }
+    (function tick() {
+      if (!on) return;
+      an.getByteTimeDomainData(buf);
+      var peak = 0; for (var i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128));
+      el.firstChild.style.width = Math.min(100, peak / 128 * 140) + '%';
+      raf = requestAnimationFrame(tick);
+    })();
+    return function () { on = false; cancelAnimationFrame(raf); try { src.disconnect(); ctx.close(); } catch (e) { /* closed */ } el.firstChild.style.width = '0'; };
+  }
+  function loadSet(kind) { try { return JSON.parse(localStorage.getItem('spark-live-' + kind)) || {}; } catch (e) { return {}; } }
+  function saveSet(kind, v) { try { localStorage.setItem('spark-live-' + kind, JSON.stringify(v)); } catch (e) { /* private mode */ } }
+  function clock(ms) { var t = Math.floor(ms / 1000); return pad(Math.floor(t / 3600)) + ':' + pad(Math.floor(t / 60) % 60) + ':' + pad(t % 60); }
+
+  function startLive(kind, S, hooks) {
     var LK = window.LivekitClient;
     return liveToken(kind).then(function (t) {
-      var room = new LK.Room();
+      var room = new LK.Room(), got = {};
       return room.connect(t.url, t.token).then(function () {
         room.on(LK.RoomEvent.LocalTrackPublished, function (pub) {
-          if (pub.track && pub.track.kind === 'video' && preview) pub.track.attach(preview);
+          var tr = pub.track; if (!tr) return;
+          if (tr.kind === 'video') { got.video = tr; if (hooks.preview) tr.attach(hooks.preview); }
+          else if (tr.kind === 'audio' && tr.mediaStreamTrack) got.audio = tr.mediaStreamTrack;
         });
-        room.on(LK.RoomEvent.Disconnected, function () { if (onAir[kind] && onAir[kind].room === room) stopLive(kind).then(function () { toast('The ' + kind + ' broadcast lost its connection and went off air', true); }); });
+        room.on(LK.RoomEvent.Disconnected, function () { if (onAir[kind] && onAir[kind].room === room) stopLive(kind).then(function () { toast('The ' + kind + ' broadcast lost its connection and went off air', true); if (hooks.onEnd) hooks.onEnd(); }); });
         var lp = room.localParticipant;
-        var steps = [lp.setMicrophoneEnabled(true)];
-        if (kind === 'tv') steps.push(source === 'screen' ? lp.setScreenShareEnabled(true) : lp.setCameraEnabled(true));
+        var mic = { echoCancellation: S.echo !== false, noiseSuppression: S.noise !== false, autoGainControl: S.agc !== false };
+        if (S.mic) mic.deviceId = S.mic;
+        var steps = [lp.setMicrophoneEnabled(true, mic)];
+        if (kind === 'tv') {
+          var r = RES[S.res] || RES['720'];
+          steps.push(S.source === 'screen' ? lp.setScreenShareEnabled(true) : lp.setCameraEnabled(true, { deviceId: S.cam || undefined, resolution: { width: r[0], height: r[1], frameRate: 30 } }));
+        }
         return Promise.all(steps).then(function () {
-          return sb.rpc('live_set', { p_kind: kind, p_title: title, p_on: true });
+          return sb.rpc('live_set', { p_kind: kind, p_title: S.title || '', p_on: true });
         }).then(function (r) {
           if (r.error) throw r.error;
-          onAir[kind] = { room: room, timer: setInterval(function () { sb.rpc('live_beat', { p_kind: kind }); }, 30000) };
+          onAir[kind] = { room: room, since: Date.now(), video: got.video,
+            timer: setInterval(function () { sb.rpc('live_beat', { p_kind: kind }); }, 30000) };
+          paintTabs();
         }).catch(function (e) { try { room.disconnect(); } catch (x) { /* ignore */ } throw e; });
-      });
+      }).then(function () { return got; });
     });
   }
   window.addEventListener('beforeunload', function (e) { if (onAir.radio || onAir.tv) { e.preventDefault(); e.returnValue = ''; } });
 
-  function openLive() {
-    var body = h('div', { class: 'livebody' });
-    var dlg = h('dialog', { class: 'small' }, h('header', {}, h('b', { text: 'Go live' }),
-      h('button', { class: 'btn', type: 'button', text: 'Close', onclick: function () { dlg.close(); dlg.remove(); } })), body);
-    document.body.appendChild(dlg); dlg.showModal();
+  /* one studio window per channel: radio and TV have their own settings (saved in this browser) */
+  function showDash(kind) {
+    var isTv = kind === 'tv', S = loadSet(kind), stops = [];
+    var save = function () { saveSet(kind, S); };
+    var title = h('input', { type: 'text', value: S.title || '', placeholder: isTv ? 'e.g. Evening news' : 'e.g. Morning bulletin', maxlength: '120', oninput: function () { S.title = title.value; save(); } });
+    var mic = h('select', { onchange: function () { S.mic = mic.value; save(); } }, h('option', { value: '', text: 'Default microphone' }));
+    var cam = isTv ? h('select', { onchange: function () { S.cam = cam.value; save(); } }, h('option', { value: '', text: 'Default camera' })) : null;
+    var source = isTv ? h('select', { onchange: function () { S.source = source.value; save(); sync(); } }, h('option', { value: 'camera', text: 'Camera and microphone' }), h('option', { value: 'screen', text: 'Screen share and microphone' })) : null;
+    if (source) source.value = S.source || 'camera';
+    var res = isTv ? h('select', { onchange: function () { S.res = res.value; save(); } }, h('option', { value: '360', text: '360p (saves data)' }), h('option', { value: '720', text: '720p HD' }), h('option', { value: '1080', text: '1080p Full HD' })) : null;
+    if (res) res.value = S.res || '720';
+    var opt = function (key, label) { var c = check(label, S[key] !== false, function () { S[key] = c.input.checked; save(); }); return c.box; };
+    var camField = cam ? field('Camera', cam) : null;
+    var meter = h('div', { class: 'meter', 'aria-label': 'Microphone level' }, h('i'));
+    var preview = isTv ? h('video', { class: 'livepreview', autoplay: true, playsinline: true }) : null;
+    if (preview) preview.muted = true;
+    var badge = h('span', { class: 'airbadge' }), timer = h('span', { class: 'airtime' });
+    var status = h('p', { class: 'hint' });
+    var go = h('button', { class: 'btn primary big', type: 'button' });
+    var test = h('button', { class: 'btn', type: 'button', text: 'Test microphone' });
 
-    function panel(kind) {
-      var title = h('input', { type: 'text', placeholder: kind === 'radio' ? 'e.g. Morning bulletin' : 'e.g. Evening news', maxlength: '120' });
-      var source = kind === 'tv' ? h('select', {}, h('option', { value: 'camera', text: 'Camera and microphone' }), h('option', { value: 'screen', text: 'Screen share and microphone' })) : null;
-      var preview = kind === 'tv' ? h('video', { class: 'livepreview', muted: true, autoplay: true, playsinline: true }) : null;
-      if (preview) preview.muted = true;
-      var status = h('p', { class: 'hint' });
-      var go = h('button', { class: 'btn primary', type: 'button' });
-      function paint() {
-        var live = !!onAir[kind];
-        go.textContent = live ? 'Stop broadcast' : 'Start broadcast'; go.className = 'btn ' + (live ? 'danger' : 'primary');
-        title.disabled = live; if (source) source.disabled = live;
-        status.textContent = live ? 'ON AIR now. Keep this page open while you broadcast.' : 'Off air.';
-        status.className = 'hint' + (live ? ' onair' : '');
-      }
-      go.onclick = function () {
-        go.disabled = true;
-        if (onAir[kind]) return stopLive(kind).then(function () { if (preview) preview.srcObject = null; toast('Off air'); paint(); go.disabled = false; });
-        status.textContent = 'Starting… allow the microphone' + (kind === 'tv' ? (source.value === 'screen' ? ' and pick a screen' : ' and camera') : '') + ' if your browser asks.';
-        loadLiveKit().then(function () { return startLive(kind, title.value.trim(), source && source.value, preview); })
-          .then(function () { toast('You are on air'); })
-          .catch(function (e) { toast(errText(e), true); })
-          .then(function () { paint(); go.disabled = false; });
-      };
-      paint();
-      return h('section', { class: 'livepanel' }, h('h3', { text: kind === 'radio' ? 'Live radio' : 'Live TV' }),
-        field('Title', title), source ? field('Source', source) : null, preview, status, go);
+    function sync() { if (cam) camField.style.display = source.value === 'screen' ? 'none' : ''; if (preview && !onAir[kind]) preview.style.display = 'none'; }
+    function fillDevices() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      navigator.mediaDevices.enumerateDevices().then(function (list) {
+        [['audioinput', mic, 'Default microphone', S.mic], ['videoinput', cam, 'Default camera', S.cam]].forEach(function (x) {
+          if (!x[1]) return;
+          x[1].replaceChildren(h('option', { value: '', text: x[2] }));
+          list.filter(function (d) { return d.kind === x[0] && d.deviceId; }).forEach(function (d, i) { x[1].appendChild(h('option', { value: d.deviceId, text: d.label || (x[0] === 'audioinput' ? 'Microphone ' : 'Camera ') + (i + 1) })); });
+          x[1].value = x[3] || '';
+        });
+      });
     }
-    body.appendChild(h('p', { class: 'hint', text: 'Visitors see what is on air on the Live page of the website. A broadcast ends by itself about a minute after this page is closed.' }));
-    body.appendChild(panel('radio')); body.appendChild(panel('tv'));
+    var testStop = null;
+    test.onclick = function () {
+      if (testStop) { testStop(); testStop = null; test.textContent = 'Test microphone'; return; }
+      navigator.mediaDevices.getUserMedia({ audio: S.mic ? { deviceId: S.mic } : true }).then(function (stream) {
+        fillDevices();
+        var stopM = startMeter(stream, meter);
+        testStop = function () { stopM(); stream.getTracks().forEach(function (t) { t.stop(); }); };
+        test.textContent = 'Stop test';
+      }).catch(function (e) { toast('Could not open the microphone: ' + errText(e), true); });
+    };
+    stops.push(function () { if (testStop) { testStop(); testStop = null; } });
+
+    function paint() {
+      var cur = onAir[kind], live = !!cur;
+      go.textContent = live ? 'Stop broadcast' : 'Start broadcast'; go.className = 'btn big ' + (live ? 'danger' : 'primary');
+      [title, mic, cam, source, res].forEach(function (x) { if (x) x.disabled = live; });
+      badge.textContent = live ? 'ON AIR' : 'OFF AIR'; badge.className = 'airbadge' + (live ? ' on' : '');
+      timer.textContent = live ? clock(Date.now() - cur.since) : '';
+      status.textContent = live ? 'You are live. Keep this page open (you can switch windows) while you broadcast.' : 'Not broadcasting. Check your settings, then press Start.';
+      if (preview) { preview.style.display = live || S.source !== 'screen' ? '' : 'none'; }
+      paintTabs();
+    }
+    var tick = setInterval(function () { if (onAir[kind]) timer.textContent = clock(Date.now() - onAir[kind].since); }, 1000);
+    stops.push(function () { clearInterval(tick); });
+
+    go.onclick = function () {
+      go.disabled = true;
+      if (onAir[kind]) return stopLive(kind).then(function () { if (preview) preview.srcObject = null; toast('Off air'); paint(); go.disabled = false; });
+      if (testStop) { testStop(); testStop = null; test.textContent = 'Test microphone'; }
+      status.textContent = 'Starting… allow the microphone' + (isTv ? (source.value === 'screen' ? ' and pick a screen' : ' and camera') : '') + ' if your browser asks.';
+      loadLiveKit().then(function () { return startLive(kind, S, { preview: preview, onEnd: paint }); })
+        .then(function (got) {
+          if (got.audio) onAir[kind].stopMeter = startMeter(new MediaStream([got.audio]), meter);
+          toast('You are on air'); fillDevices();
+        })
+        .catch(function (e) { toast(errText(e), true); })
+        .then(function () { paint(); go.disabled = false; });
+    };
+
+    /* come back to a running broadcast after visiting another window */
+    if (onAir[kind] && onAir[kind].video && preview) onAir[kind].video.attach(preview);
+    fillDevices(); sync(); paint();
+    dashCleanup = function () { stops.forEach(function (f) { f(); }); };
+
+    return h('div', { class: 'dash' },
+      h('div', { class: 'dashhead' }, h('h2', { text: isTv ? 'TV studio' : 'Radio studio' }), badge, timer),
+      h('div', { class: 'dashgrid' },
+        h('section', { class: 'panel' }, h('h3', { text: 'Broadcast' }),
+          field('Title shown to visitors', title), source ? field('Source', source) : null,
+          preview, h('div', { class: 'metrow' }, h('span', { text: 'Mic level' }), meter), status, h('div', { class: 'btnrow' }, go, test)),
+        h('section', { class: 'panel' }, h('h3', { text: 'Settings (saved in this browser)' }),
+          field('Microphone', mic), camField, res ? field('Video quality', res) : null,
+          opt('echo', 'Echo cancellation'), opt('noise', 'Noise suppression'), opt('agc', 'Automatic volume levelling'),
+          h('p', { class: 'hint', text: 'Use headphones when you test so the radio does not echo into your microphone.' }))));
   }
 
   /* ---------------------------------------------------------------- team panel (admins) */
@@ -423,6 +534,7 @@
   /* ---------------------------------------------------------------- the article form */
   function showForm(a) {
     current = a; dirty = false;
+    document.body.classList.remove('focusing');
     quill = null;   /* the previous article's editor must never leak into this one */
     var isNew = !a.id;
     var isHtml = a.content_type === 'html' || a.content_type === 'interactive';
@@ -444,6 +556,7 @@
     var contentHtml = a.content || '';
 
     function buildBody() {
+      if (focusOff) focusOff();
       if (quill) { contentHtml = quill.getLength() > 1 ? quill.root.innerHTML : ''; }
       quill = null; f.rawHtml = null;
       var type = f.contentType.value;
@@ -465,6 +578,49 @@
       } else {
         bodyBox.replaceChildren(h('div', { class: 'msg info', text: 'This is a full-HTML page. Only admins can change its content. You can still edit everything else.' }));
       }
+    }
+
+    /* focus window: full screen writing; everything except the line you are on is dimmed */
+    var focusBtn = h('button', { class: 'btn', type: 'button', text: 'Focus', title: 'Distraction-free writing, one line at a time', onclick: function () { enterFocus(); } });
+    var focusOff = null;
+    function enterFocus() {
+      if (!quill) return toast('Focus mode is for normal articles', true);
+      var wrap = document.getElementById('quill-wrap'), root = quill.root, q = quill;
+      var lineMode = true, typeMode = true;
+      var dimTop = h('div', { class: 'fdim' }), dimBot = h('div', { class: 'fdim' });
+      var words = h('span', { class: 'fwords' });
+      var bar = h('div', { class: 'focusbar' },
+        h('b', { text: 'Focus' }),
+        (function () { var c = check('One line at a time', true, function () { lineMode = c.input.checked; place(); }); return c.box; })(),
+        (function () { var c = check('Typewriter scrolling', true, function () { typeMode = c.input.checked; place(); }); return c.box; })(),
+        words, h('span', { class: 'sp' }),
+        h('button', { class: 'btn', type: 'button', text: 'Exit (Esc)', onclick: leave }));
+      wrap.classList.add('focus'); wrap.insertBefore(bar, wrap.firstChild); wrap.appendChild(dimTop); wrap.appendChild(dimBot);
+      document.body.classList.add('focusing');
+      function place() {
+        var r = q.getSelection(); var n = q.getText().trim();
+        words.textContent = (n ? n.split(/\s+/).length : 0) + ' words';
+        if (!r) return;
+        var b = q.getBounds(r.index, 0), box = q.container.getBoundingClientRect();
+        var top = box.top + b.top, bottom = top + b.height;
+        if (typeMode) {
+          var diff = top - window.innerHeight * 0.42;
+          if (Math.abs(diff) > 2) root.scrollTop += diff, top -= diff, bottom -= diff;
+        }
+        dimTop.style.display = dimBot.style.display = lineMode ? '' : 'none';
+        dimTop.style.height = Math.max(0, top - 3) + 'px'; dimBot.style.top = (bottom + 3) + 'px';
+      }
+      function key(e) { if (e.key === 'Escape') { e.preventDefault(); leave(); } }
+      q.on('selection-change', place); q.on('text-change', place);
+      root.addEventListener('scroll', place); window.addEventListener('resize', place); document.addEventListener('keydown', key);
+      function leave() {
+        q.off('selection-change', place); q.off('text-change', place);
+        root.removeEventListener('scroll', place); window.removeEventListener('resize', place); document.removeEventListener('keydown', key);
+        wrap.classList.remove('focus'); bar.remove(); dimTop.remove(); dimBot.remove(); document.body.classList.remove('focusing');
+        focusOff = null; q.focus();
+      }
+      focusOff = leave;
+      q.focus(); if (!q.getSelection()) q.setSelection(q.getLength() - 1, 0); place();
     }
 
     /* status panel */
@@ -546,7 +702,7 @@
     var delBtn = me.role === 'admin' && a.id ? h('button', { class: 'btn danger', type: 'button', text: 'Delete', onclick: remove }) : null;
 
     mainEl.replaceChildren(
-      h('div', { class: 'head' }, h('h2', { text: isNew ? 'New article' : 'Edit article' }), dirtyEl, prevBtn, viewBtn, saveBtn, pubBtn),
+      h('div', { class: 'head' }, h('h2', { text: isNew ? 'New article' : 'Edit article' }), dirtyEl, focusBtn, prevBtn, viewBtn, saveBtn, pubBtn),
       h('div', { class: 'cols' },
         h('div', {}, h('div', { class: 'panel' }, f.title, f.subtitle), h('div', { class: 'panel' }, bodyBox)),
         h('div', {},

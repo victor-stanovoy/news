@@ -72,9 +72,14 @@ Without this, a published article appears on the site only at the next hourly re
 
 If nothing happens run `select status_code, content from net._http_response order by id desc limit 5;`. 204 = accepted. 401/403/404 = wrong or expired token, or it lacks *Actions: Read and write* on `news`.
 
+## Editor windows
+
+The editor has separate windows (tabs): **Articles**, **Radio studio** and **TV studio** (the studios are for admins and editors).
+In an article press **Focus** for a full-screen writing window: only the line you are typing on stays bright, the rest is dimmed, and the line stays in the middle of the screen (both can be switched off). Press Esc to leave.
+
 ## Live radio and live TV (LiveKit)
 
-Editors and admins press **Go live** in the editor, pick Radio and/or TV and start broadcasting from the browser (microphone, camera or screen).
+Editors and admins have two separate studio windows in the editor, the **Radio studio** and **TV studio** tabs. Each has its own title, settings (microphone, camera, video quality, echo and noise filters, saved in that browser), a microphone level meter and a Start / Stop button. The tab shows a red dot while that channel is on air, and you can switch to other windows while broadcasting.
 Visitors open the **Live** page of the website (a menu link that pulses red while something is on air) and press Listen / Watch. No login is needed to watch.
 A broadcast goes off air by itself about a minute after the editor page is closed. Streaming goes through [LiveKit Cloud](https://livekit.io) (a free plan exists; check their limits).
 
@@ -84,7 +89,7 @@ One-time setup (about 15 minutes):
 2. **Database part.** Supabase **SQL Editor > New query**, paste `supabase/live.sql`, **Run**.
 3. **Token function.** Supabase **Edge Functions > Deploy a new function > Via Editor**. Name it exactly `livekit-token`, paste the whole file `supabase/functions/livekit-token/index.ts`, and **turn OFF "Verify JWT"** (the function checks who is asking itself). Deploy.
 4. **Secrets.** Supabase **Edge Functions > Secrets**, add `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` with the three values from step 1. The secret never reaches the website; browsers only get short-lived tokens (publishing: signed-in admins and editors only; watching: anyone, only while on air).
-5. Open the editor, press **Go live**, enter a title, **Start broadcast**, allow the microphone. Then open the website's **Live** page in another tab and press Listen.
+5. Open the editor, choose the **Radio studio** tab, enter a title, **Start broadcast**, allow the microphone. Then open the website's **Live** page in another tab and press Listen.
 6. If you do not want the Live page, set `"live": {"enabled": false}` in `site.json`.
 
 Tips: use headphones while testing so the radio does not echo into your microphone. Keep the editor page open while broadcasting.
