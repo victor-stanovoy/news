@@ -340,6 +340,7 @@
     onAir[kind] = null; clearInterval(cur.timer); clearInterval(cur.clock);
     if (cur.stopMeter) cur.stopMeter();
     try { cur.room.disconnect(); } catch (e) { /* already gone */ }
+    if (cur.mixer) { stopDeck(kind); cur.mixer.stop(); newDeckEl(kind); deckState[kind].ui(); }   /* the old player is tied to the closed mixer */
     paintTabs();
     return sb.rpc('live_set', { p_kind: kind, p_title: null, p_on: false });
   }
@@ -362,9 +363,76 @@
   function saveSet(kind, v) { try { localStorage.setItem('spark-live-' + kind, JSON.stringify(v)); } catch (e) { /* private mode */ } }
   function clock(ms) { var t = Math.floor(ms / 1000); return pad(Math.floor(t / 3600)) + ':' + pad(Math.floor(t / 60) % 60) + ':' + pad(t % 60); }
 
+  /* ---- music library + mixer: the deck plays songs, the mixer blends them with the microphone into one broadcast track */
+  var deckState = { radio: null, tv: null };
+  function deckFor(kind) {
+    var d = deckState[kind];
+    if (!d) { d = deckState[kind] = { el: null, tracks: [], idx: -1, autoNext: true, ui: function () {} }; newDeckEl(kind); }
+    return d;
+  }
+  function nextMusic(d, from) { for (var i = from; i < d.tracks.length; i++) if (d.tracks[i].kind !== 'jingle') return i; return -1; }
+  function newDeckEl(kind) {
+    var d = deckState[kind], el = new Audio();
+    el.crossOrigin = 'anonymous'; el.preload = 'auto';
+    el.addEventListener('ended', function () {
+      var t = d.tracks[d.idx], n = d.autoNext && t && t.kind !== 'jingle' ? nextMusic(d, d.idx + 1) : -1;
+      if (n >= 0) playTrack(kind, n); else { d.idx = -1; d.ui(); }
+    });
+    el.addEventListener('play', function () { d.ui(); }); el.addEventListener('pause', function () { d.ui(); });
+    d.el = el;
+  }
+  function playTrack(kind, i) {
+    var d = deckFor(kind), t = d.tracks[i];
+    if (!t) { d.idx = -1; d.ui(); return; }
+    d.idx = i; d.ui();
+    sb.storage.from('audio').createSignedUrl(t.path, 3600).then(function (r) {
+      if (r.error) throw r.error;
+      d.el.src = r.data.signedUrl; return d.el.play();
+    }).catch(function (e) { toast('Could not play "' + t.title + '": ' + errText(e), true); d.idx = -1; d.ui(); });
+  }
+  function stopDeck(kind) {
+    var d = deckState[kind]; if (!d) return;
+    try { d.el.pause(); } catch (e) { /* ignore */ }
+    d.idx = -1; d.ui();
+  }
+  function buildMixer(S, d) {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC || !navigator.mediaDevices) return Promise.reject(new Error('this browser cannot mix audio'));
+    var ctx = new AC();
+    var audio = { echoCancellation: S.echo !== false, noiseSuppression: S.noise !== false, autoGainControl: S.agc !== false };
+    if (S.mic) audio.deviceId = S.mic;
+    return navigator.mediaDevices.getUserMedia({ audio: audio }).then(function (stream) {
+      var dest = ctx.createMediaStreamDestination(), micGain = ctx.createGain(), musicGain = ctx.createGain(), an = ctx.createAnalyser();
+      var micSrc = ctx.createMediaStreamSource(stream), musicSrc = ctx.createMediaElementSource(d.el);
+      an.fftSize = 512; var buf = new Uint8Array(an.fftSize);
+      micSrc.connect(micGain); micGain.connect(dest); micSrc.connect(an);
+      musicSrc.connect(musicGain); musicGain.connect(dest); musicGain.connect(ctx.destination);   /* you hear the music too, never your own voice */
+      var m = { track: dest.stream.getAudioTracks()[0], muted: false, micVol: 100, musicVol: 80, duck: true, talking: false };
+      function apply() {
+        micGain.gain.setTargetAtTime(m.muted ? 0 : m.micVol / 100, ctx.currentTime, 0.03);
+        musicGain.gain.setTargetAtTime(m.musicVol / 100 * (m.duck && m.talking && !m.muted ? 0.2 : 1), ctx.currentTime, 0.2);
+      }
+      var timer = setInterval(function () {
+        an.getByteTimeDomainData(buf);
+        var peak = 0; for (var i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128));
+        var talking = peak > 14; if (talking !== m.talking) { m.talking = talking; apply(); }
+      }, 90);
+      m.set = function (k, v) { m[k] = v; apply(); };
+      m.stop = function () { clearInterval(timer); stream.getTracks().forEach(function (t) { t.stop(); }); try { musicSrc.disconnect(); ctx.close(); } catch (e) { /* closed */ } };
+      if (ctx.state === 'suspended') ctx.resume();
+      apply();
+      return m;
+    }).catch(function (e) { try { ctx.close(); } catch (x) { /* ignore */ } throw e; });
+  }
+
   function startLive(kind, S, hooks) {
     var LK = window.LivekitClient;
-    return liveToken(kind).then(function (t) {
+    var d = deckFor(kind);
+    var mixP = LK.LocalAudioTrack ? buildMixer(S, d).catch(function (e) {
+      toast('Music mixer unavailable (' + errText(e) + '). Broadcasting the microphone only.', true); return null;
+    }) : Promise.resolve(null);
+    return Promise.all([liveToken(kind), mixP]).then(function (pair) {
+      var t = pair[0], mixer = pair[1];
       var room = new LK.Room(), got = {};
       return room.connect(t.url, t.token).then(function () {
         room.on(LK.RoomEvent.LocalTrackPublished, function (pub) {
@@ -376,7 +444,8 @@
         var lp = room.localParticipant;
         var mic = { echoCancellation: S.echo !== false, noiseSuppression: S.noise !== false, autoGainControl: S.agc !== false };
         if (S.mic) mic.deviceId = S.mic;
-        var steps = [lp.setMicrophoneEnabled(true, mic)];
+        if (mixer) { mixer.micVol = S.micVol == null ? 100 : S.micVol; mixer.musicVol = S.musicVol == null ? 80 : S.musicVol; mixer.duck = S.duck !== false; mixer.set('muted', !!hooks.muted); }
+        var steps = [mixer ? lp.publishTrack(new LK.LocalAudioTrack(mixer.track), { source: LK.Track.Source.Microphone }) : lp.setMicrophoneEnabled(true, mic)];
         if (kind === 'tv') {
           var r = RES[S.res] || RES['720'];
           steps.push(S.source === 'screen' ? lp.setScreenShareEnabled(true) : lp.setCameraEnabled(true, { deviceId: S.cam || undefined, resolution: { width: r[0], height: r[1], frameRate: 30 } }));
@@ -385,14 +454,105 @@
           return sb.rpc('live_set', { p_kind: kind, p_title: S.title || '', p_on: true });
         }).then(function (r) {
           if (r.error) throw r.error;
-          onAir[kind] = { room: room, since: Date.now(), video: got.video,
+          onAir[kind] = { room: room, since: Date.now(), video: got.video, mixer: mixer,
             timer: setInterval(function () { sb.rpc('live_beat', { p_kind: kind }); }, 30000) };
           paintTabs();
-        }).catch(function (e) { try { room.disconnect(); } catch (x) { /* ignore */ } throw e; });
+        }).catch(function (e) { try { room.disconnect(); } catch (x) { /* ignore */ } if (mixer) mixer.stop(); throw e; });
       }).then(function () { return got; });
     });
   }
   window.addEventListener('beforeunload', function (e) { if (onAir.radio || onAir.tv) { e.preventDefault(); e.returnValue = ''; } });
+
+  /* the "Music & jingles" panel of a studio */
+  var micMuted = { radio: false, tv: false };
+  function musicPanel(kind, S, save, stops) {
+    var d = deckFor(kind), list = h('div', { class: 'tracks' }), now = h('div', { class: 'nowplaying' });
+    var fileIn = h('input', { type: 'file', accept: 'audio/*', multiple: true });
+    var kindSel = h('select', {}, h('option', { value: 'music', text: 'Music' }), h('option', { value: 'jingle', text: 'Jingle (plays once)' }));
+    var upMsg = h('span', { class: 'hint' });
+    var playBtn = h('button', { class: 'btn', type: 'button' }), nextBtn = h('button', { class: 'btn', type: 'button', text: 'Next' });
+    var stopBtn = h('button', { class: 'btn', type: 'button', text: 'Stop' });
+    var muteBtn = h('button', { class: 'btn', type: 'button' });
+    var mixer = function () { return onAir[kind] && onAir[kind].mixer; };
+
+    function applyVol() {
+      var m = mixer();
+      if (m) { m.set('micVol', micV.value * 1); m.set('musicVol', musV.value * 1); m.set('duck', duck.input.checked); }
+      else d.el.volume = Math.min(1, musV.value / 100);   /* before going on air: plain preview on your speakers */
+    }
+    var micV = h('input', { type: 'range', min: 0, max: 150, value: S.micVol == null ? 100 : S.micVol, 'aria-label': 'Microphone volume', oninput: function () { S.micVol = micV.value * 1; save(); applyVol(); } });
+    var musV = h('input', { type: 'range', min: 0, max: 100, value: S.musicVol == null ? 80 : S.musicVol, 'aria-label': 'Music volume', oninput: function () { S.musicVol = musV.value * 1; save(); applyVol(); } });
+    var duck = check('Lower the music while I speak', S.duck !== false, function () { S.duck = duck.input.checked; save(); applyVol(); });
+    var auto = check('Play the next song automatically', d.autoNext, function () { d.autoNext = auto.input.checked; });
+
+    function ui() {
+      var t = d.tracks[d.idx], playing = !d.el.paused && d.idx >= 0;
+      now.textContent = t ? (playing ? '▶ ' : '❚❚ ') + t.title : 'Nothing playing';
+      playBtn.textContent = playing ? 'Pause' : 'Play'; playBtn.disabled = !d.tracks.length;
+      muteBtn.textContent = micMuted[kind] ? 'Unmute microphone' : 'Mute microphone'; muteBtn.className = 'btn' + (micMuted[kind] ? ' danger' : '');
+      list.querySelectorAll('.track').forEach(function (r, i) { r.classList.toggle('on', i === d.idx); });
+    }
+    d.ui = ui; stops.push(function () { d.ui = function () {}; });
+    playBtn.onclick = function () {
+      if (d.idx >= 0) { d.el.paused ? d.el.play() : d.el.pause(); return; }
+      var first = nextMusic(d, 0); playTrack(kind, first >= 0 ? first : 0);
+    };
+    nextBtn.onclick = function () { var n = nextMusic(d, d.idx + 1); if (n >= 0) playTrack(kind, n); else stopDeck(kind); };
+    stopBtn.onclick = function () { stopDeck(kind); };
+    muteBtn.onclick = function () { micMuted[kind] = !micMuted[kind]; if (mixer()) mixer().set('muted', micMuted[kind]); ui(); };
+
+    function renderTracks() {
+      if (!d.tracks.length) { list.replaceChildren(h('div', { class: 'empty', text: 'No music yet. Upload songs and jingles above.' })); return ui(); }
+      list.replaceChildren.apply(list, d.tracks.map(function (t, i) {
+        return h('div', { class: 'track' },
+          h('button', { class: 'btn', type: 'button', text: '▶', 'aria-label': 'Play ' + t.title, onclick: function () { playTrack(kind, i); } }),
+          h('span', { class: 'tt' }, h('b', { text: t.title }), h('small', { text: (t.kind === 'jingle' ? 'Jingle' : 'Music') + (t.size ? ' · ' + (t.size / 1048576).toFixed(1) + ' MB' : '') })),
+          h('button', { class: 'btn danger', type: 'button', text: 'Delete', onclick: function () {
+            if (!confirm('Delete "' + t.title + '" from the library?')) return;
+            if (d.idx === i) stopDeck(kind);
+            sb.storage.from('audio').remove([t.path]).then(function () { return sb.from('tracks').delete().eq('id', t.id); })
+              .then(function (r) { if (r && r.error) toast(errText(r.error), true); load(); });
+          } }));
+      }));
+      ui();
+    }
+    function load() {
+      sb.from('tracks').select('*').order('title', { ascending: true }).then(function (r) {
+        if (r.error) { list.replaceChildren(h('div', { class: 'msg err', text: /relation|does not exist|schema cache/i.test(r.error.message || '') ? 'The music library is not set up yet. Run supabase/music.sql in Supabase (see the README).' : errText(r.error) })); return; }
+        var playing = d.tracks[d.idx]; d.tracks = r.data || [];
+        d.idx = playing ? d.tracks.findIndex(function (t) { return t.id === playing.id; }) : -1;
+        renderTracks();
+      });
+    }
+    var uploadBtn = h('button', { class: 'btn primary', type: 'button', text: 'Upload', onclick: function () {
+      var files = [].slice.call(fileIn.files); if (!files.length) return fileIn.click();
+      uploadBtn.disabled = true; var done = 0;
+      (function next() {
+        var f = files.shift();
+        if (!f) { uploadBtn.disabled = false; fileIn.value = ''; upMsg.textContent = done ? 'Uploaded ' + done + ' file' + (done > 1 ? 's' : '') + '.' : ''; return load(); }
+        if (!/^audio\//.test(f.type) && !/\.(mp3|m4a|aac|wav|ogg|oga|flac|webm)$/i.test(f.name)) { toast(f.name + ' is not an audio file', true); return next(); }
+        if (f.size > 50 * 1048576) { toast(f.name + ' is larger than 50 MB', true); return next(); }
+        upMsg.textContent = 'Uploading ' + f.name + '…';
+        var path = Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '-' + f.name.replace(/[^\w.-]+/g, '_').slice(-60);
+        sb.storage.from('audio').upload(path, f, { contentType: f.type || 'audio/mpeg' }).then(function (r) {
+          if (r.error) throw r.error;
+          return sb.from('tracks').insert({ title: f.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' '), path: path, kind: kindSel.value, size: f.size });
+        }).then(function (r) { if (r.error) throw r.error; done++; })
+          .catch(function (e) { toast('Upload failed: ' + errText(e) + (/bucket/i.test(errText(e)) ? ' (run supabase/music.sql)' : ''), true); })
+          .then(next);
+      })();
+    } });
+    fileIn.onchange = function () { if (fileIn.files.length) uploadBtn.click(); };
+
+    applyVol(); load();
+    return h('section', { class: 'panel wide' }, h('h3', { text: 'Music & jingles' }),
+      h('div', { class: 'uprow' }, fileIn, kindSel, uploadBtn, upMsg),
+      h('div', { class: 'player' }, now, h('div', { class: 'btnrow' }, playBtn, nextBtn, stopBtn, muteBtn)),
+      h('div', { class: 'mixrow' },
+        h('label', { class: 'vol' }, h('span', { text: 'Microphone' }), micV), h('label', { class: 'vol' }, h('span', { text: 'Music' }), musV), duck.box, auto.box),
+      h('p', { class: 'hint', text: onAir[kind] ? 'On air: music is mixed into the broadcast.' : 'Off air: music plays on your speakers only, so you can try it. When you start the broadcast it is mixed with your microphone.' }),
+      list);
+  }
 
   /* one studio window per channel: radio and TV have their own settings (saved in this browser) */
   function showDash(kind) {
@@ -480,7 +640,8 @@
         h('section', { class: 'panel' }, h('h3', { text: 'Settings (saved in this browser)' }),
           field('Microphone', mic), camField, res ? field('Video quality', res) : null,
           opt('echo', 'Echo cancellation'), opt('noise', 'Noise suppression'), opt('agc', 'Automatic volume levelling'),
-          h('p', { class: 'hint', text: 'Use headphones when you test so the radio does not echo into your microphone.' }))));
+          h('p', { class: 'hint', text: 'Use headphones when you test so the radio does not echo into your microphone.' })),
+        musicPanel(kind, S, save, stops)));
   }
 
   /* ---------------------------------------------------------------- team panel (admins) */

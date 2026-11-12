@@ -80,6 +80,7 @@ In an article press **Focus** for a full-screen writing window: only the line yo
 ## Live radio and live TV (LiveKit)
 
 Editors and admins have two separate studio windows in the editor, the **Radio studio** and **TV studio** tabs. Each has its own title, settings (microphone, camera, video quality, echo and noise filters, saved in that browser), a microphone level meter and a Start / Stop button. The tab shows a red dot while that channel is on air, and you can switch to other windows while broadcasting.
+Each studio also has a **Music & jingles** panel: upload songs and jingles (mp3, m4a, wav, ogg, flac; up to 50 MB each), press play, and the music is **mixed with your microphone into the broadcast**. There are volume sliders for the microphone and the music, a mute button, an option that lowers the music while you speak, and automatic play of the next song. Before you go on air, music plays on your speakers only so you can try it. Only admins and editors can see or use the library; visitors only hear the broadcast. One-time setup: run `supabase/music.sql` in the Supabase SQL Editor (same way as the other files). Only upload music you have the right to broadcast.
 Visitors open the **Live** page of the website (a menu link that pulses red while something is on air) and press Listen / Watch. No login is needed to watch.
 A broadcast goes off air by itself about a minute after the editor page is closed. Streaming goes through [LiveKit Cloud](https://livekit.io) (a free plan exists; check their limits).
 

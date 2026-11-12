@@ -163,3 +163,15 @@ dialog.small{height:fit-content;max-height:86vh;width:min(620px,94vw)}
 .fdim{position:fixed;top:0;left:0;right:0;background:color-mix(in srgb,var(--card) 88%,transparent);pointer-events:none;z-index:2}
 .fdim:last-of-type{bottom:0}
 body.focusing{overflow:hidden}
+
+/* music library */
+.panel.wide{grid-column:1/-1}
+.uprow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.uprow input[type=file]{max-width:260px}.uprow select{width:auto}
+.player{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:8px;margin-bottom:12px}
+.nowplaying{font-weight:700;min-width:0;overflow-wrap:anywhere}
+.mixrow{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:8px}.mixrow .check{margin:0}
+.vol{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}.vol input{width:140px;accent-color:var(--accent)}
+.tracks{display:grid;gap:6px;margin-top:8px}
+.track{display:flex;align-items:center;gap:10px;padding:6px 8px;border:1px solid var(--line);border-radius:8px}.track.on{background:rgba(255,106,43,.12);border-color:var(--spark)}
+.track .tt{flex:1;min-width:0}.track .tt b,.track .tt small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.track .tt small{color:var(--muted);font-size:12px}
+.track .btn{padding:5px 11px}
