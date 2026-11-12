@@ -62,19 +62,17 @@ Without this, a published article appears on the site only at the next hourly re
 
 1. Open https://github.com/settings/personal-access-tokens/new. Name: `SparkNews rebuild`. Expiration: 1 year. **Repository access: Only select repositories > news.**
    Under **Repository permissions** add **Actions** and set it to **Read and write**. Leave all else. **Generate token** and copy it (starts with `github_pat_`; shown once).
-2. In Supabase **SQL Editor > New query**, paste the whole file `supabase/instant-rebuild.sql` **unchanged** and press **Run** (it must say Success).
-3. New query, paste this with your token instead of the dots, **Run** (it must say *1 row affected*):
-   ```sql
-   update public.app_secrets set value = 'github_pat_...' where key = 'github_token';
-   ```
+2. In Supabase **SQL Editor > New query**, paste the whole file `supabase/instant-rebuild.sql` **unchanged** and press **Run** (it must say Success). Also run `supabase/settings.sql` the same way (once).
+3. Open the editor, the **Settings** tab, the **Instant website updates** box: paste the token, press **Save token**. (The token is stored where the website and the editor pages cannot read it, and is never shown again.)
 4. Open the editor and press **Update website**. It says the update started; the **Actions** tab shows a new run. A minute later refresh the site with Ctrl+Shift+R (GitHub Pages caches for a few minutes).
-5. From now on every publish, edit, unpublish or take-down starts a rebuild by itself. Drafts do not. Set a reminder for the token's expiry day: make a new token and repeat step 3.
+5. From now on every publish, edit, unpublish or take-down starts a rebuild by itself. Drafts do not. Set a reminder for the token's expiry day: make a new token and paste it in Settings again.
 
 If nothing happens run `select status_code, content from net._http_response order by id desc limit 5;`. 204 = accepted. 401/403/404 = wrong or expired token, or it lacks *Actions: Read and write* on `news`.
 
 ## Editor windows
 
-The editor has separate windows (tabs): **Articles**, **Radio studio** and **TV studio** (the studios are for admins and editors).
+The editor has separate windows (tabs): **Articles**, **Radio studio** and **TV studio** (the studios are for admins and editors) and **Settings** (admins).
+In **Settings** an admin changes the site name, logo, tagline, footer, menu, homepage sections, tickers and the Live page, and enters the LiveKit and GitHub keys. Run `supabase/settings.sql` once to switch it on. Saved settings win over `site.json` the next time the website is built (it rebuilds by itself when instant updates are set up, otherwise press **Update website**). Only the database address and key stay in `site.json`, because the editor needs them to log in.
 In an article press **Focus** for a full-screen writing window: only the line you are typing on stays bright, the rest is dimmed, and the line stays in the middle of the screen (both can be switched off). Press Esc to leave.
 
 ## Live radio and live TV (LiveKit)
@@ -89,9 +87,9 @@ One-time setup (about 15 minutes):
 1. **LiveKit project.** Sign up at cloud.livekit.io and create a project. In **Settings > Keys** create an API key. Note three values: the **URL** (`wss://....livekit.cloud`), the **API key** and the **API secret**.
 2. **Database part.** Supabase **SQL Editor > New query**, paste `supabase/live.sql`, **Run**.
 3. **Token function.** Supabase **Edge Functions > Deploy a new function > Via Editor**. Name it exactly `livekit-token`, paste the whole file `supabase/functions/livekit-token/index.ts`, and **turn OFF "Verify JWT"** (the function checks who is asking itself). Deploy.
-4. **Secrets.** Supabase **Edge Functions > Secrets**, add `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` with the three values from step 1. The secret never reaches the website; browsers only get short-lived tokens (publishing: signed-in admins and editors only; watching: anyone, only while on air).
+4. **LiveKit details.** Run `supabase/settings.sql` once (SQL Editor). Then open the editor's **Settings** tab, box **Live radio and TV**, enter the LiveKit address (`wss://...`), API key and API secret, and press **Test connection**. It says *Connected to LiveKit* when all is right. The secret is stored where the website and the editor pages cannot read it; browsers only ever get short-lived tokens (publishing: signed-in admins and editors only; watching: anyone, only while on air). (Alternative: Supabase Edge Functions > Secrets `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`; settings saved in the editor win.)
 5. Open the editor, choose the **Radio studio** tab, enter a title, **Start broadcast**, allow the microphone. Then open the website's **Live** page in another tab and press Listen.
-6. If you do not want the Live page, set `"live": {"enabled": false}` in `site.json`.
+6. If you do not want the Live page, untick *Show the Live page and menu link* in Settings.
 
 Tips: use headphones while testing so the radio does not echo into your microphone. Keep the editor page open while broadcasting.
 

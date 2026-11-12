@@ -175,3 +175,9 @@ body.focusing{overflow:hidden}
 .track{display:flex;align-items:center;gap:10px;padding:6px 8px;border:1px solid var(--line);border-radius:8px}.track.on{background:rgba(255,106,43,.12);border-color:var(--spark)}
 .track .tt{flex:1;min-width:0}.track .tt b,.track .tt small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.track .tt small{color:var(--muted);font-size:12px}
 .track .btn{padding:5px 11px}
+
+/* settings window */
+.settings{max-width:900px}.dashhead .sp{flex:1}.dashhead .dirty{font-size:12px;color:var(--accent);font-weight:700}
+.setgrid{display:grid;gap:16px}
+.settings .hint{color:var(--muted);font-size:13px;margin:0 0 10px}.settings .hint.ok{color:var(--ok);font-weight:700}.settings .hint.err{color:var(--bad);font-weight:700}
+.kv{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.kv span{font-size:12px;font-weight:700;text-transform:uppercase;color:var(--muted)}.kv code{overflow-wrap:anywhere}

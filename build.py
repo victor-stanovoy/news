@@ -321,7 +321,7 @@ def db_settings(cfg):
     return url, key
 
 
-def db_get(url, key, path, method="GET", body=None, extra=None):
+def db_get(url, key, path, method="GET", body=None, extra=None, optional=False):
     """One request to the Supabase REST API, with a few retries. Any failure stops the build on purpose:
     the previous version of the website then stays online instead of being replaced by one with articles missing."""
     headers = {"apikey": key, "Accept": "application/json"}
@@ -344,6 +344,8 @@ def db_get(url, key, path, method="GET", body=None, extra=None):
         except (urllib.error.URLError, TimeoutError, ValueError) as e:
             last = str(e)
         time.sleep(2 * (attempt + 1))
+    if optional and any(x in str(last) for x in ("PGRST205", "42P01", "HTTP 404")):
+        return None                                  # an optional table that has not been created yet
     hint = ""
     if "404" in str(last):
         hint = ("\nHint: HTTP 404 usually means the address in site.json is wrong (it should look like https://abcdxyz.supabase.co) "
@@ -405,6 +407,80 @@ def load_config():
         cfg = json.loads(json.dumps(cfg))
         merge(cfg, json.loads(p.read_text(encoding="utf-8")))
     return cfg
+
+
+def _int(v, lo, hi, default):
+    try:
+        return max(lo, min(hi, int(float(v))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _str(v, n, default=""):
+    return v.strip()[:n] if isinstance(v, str) else default
+
+
+def clean_settings(d):
+    """Settings saved in the editor, reduced to known keys with safe types. Anything else is ignored."""
+    out = {}
+    if not isinstance(d, dict):
+        return out
+    for k, n in (("site_name", 80), ("logo_left", 40), ("logo_right", 40), ("tagline", 200), ("language", 10),
+                 ("base_url", 200), ("footer_text", 400)):
+        if isinstance(d.get(k), str):
+            out[k] = _str(d[k], n)
+    for k, lo, hi in (("nav_max", 1, 20), ("home_category_sections", 0, 20), ("most_read_count", 1, 20), ("breaking_max_age_days", 0, 365)):
+        if k in d:
+            out[k] = _int(d[k], lo, hi, DEFAULT_CONFIG[k])
+    if isinstance(d.get("nav_order"), list):
+        out["nav_order"] = [_str(x, 80) for x in d["nav_order"][:40] if isinstance(x, str) and x.strip()]
+    if isinstance(d.get("live"), dict) and "enabled" in d["live"]:
+        out["live"] = {"enabled": bool(d["live"]["enabled"])}
+    t = d.get("ticker")
+    if isinstance(t, dict):
+        o = {}
+        if "enabled" in t: o["enabled"] = bool(t["enabled"])
+        if isinstance(t.get("label"), str): o["label"] = _str(t["label"], 30)
+        if "count" in t: o["count"] = _int(t["count"], 1, 30, 10)
+        if "speed" in t: o["speed"] = _int(t["speed"], 10, 300, 60)
+        if isinstance(t.get("custom"), list):
+            cust = []
+            for it in t["custom"][:30]:
+                if isinstance(it, str) and it.strip():
+                    cust.append(_str(it, 200))
+                elif isinstance(it, dict) and isinstance(it.get("text"), str) and it["text"].strip():
+                    cust.append({"text": _str(it["text"], 200), "url": _str(it.get("url"), 300)})
+            o["custom"] = cust
+        tb = t.get("tab")
+        if isinstance(tb, dict):
+            q = {}
+            if "enabled" in tb: q["enabled"] = bool(tb["enabled"])
+            if tb.get("mode") in ("scroll", "headline"): q["mode"] = tb["mode"]
+            if isinstance(tb.get("prefix"), str): q["prefix"] = tb["prefix"][:10]
+            if isinstance(tb.get("separator"), str): q["separator"] = tb["separator"][:20]
+            for k, lo, hi in (("window_chars", 10, 80), ("step", 1, 6), ("interval_ms", 100, 3000), ("headline_interval_ms", 1000, 20000)):
+                if k in tb: q[k] = _int(tb[k], lo, hi, DEFAULT_CONFIG["ticker"]["tab"][k])
+            o["tab"] = q
+        out["ticker"] = o
+    return out
+
+
+def apply_db_settings(cfg):
+    """Settings changed in the editor's Settings panel win over site.json (which keeps the database address)."""
+    url, key = db_settings(cfg)
+    if not url or not key:
+        return
+    rows = db_get(url, key, "/rest/v1/site_settings?select=data&id=eq.1", optional=True)
+    data = clean_settings(rows[0].get("data") if rows else None)
+    def merge(base, new):
+        for k, v in new.items():
+            if isinstance(v, dict) and isinstance(base.get(k), dict):
+                merge(base[k], v)
+            else:
+                base[k] = v
+    merge(cfg, data)
+    if data:
+        print(f"Settings: {len(data)} saved in the editor override site.json")
 
 
 def load_articles(cfg, now):
@@ -920,6 +996,7 @@ class Site:
 def main():
     now = datetime.now(timezone.utc)
     cfg = load_config()
+    apply_db_settings(cfg)
     arts, skipped = load_articles(cfg, now)
     site = Site(cfg, arts, now)
 
@@ -937,7 +1014,9 @@ def main():
     if ed.exists():
         (OUT / "editor").mkdir()
         url, key = db_settings(cfg)
-        conf = json.dumps({"url": url, "anon_key": key}).replace("</", "<\\/")
+        site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
+                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live")
+        conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
                 .replace("{{CSS_VER}}", asset_ver("editor.css")).replace("{{JS_VER}}", asset_ver("editor.js")))
         w("editor/index.html", page)

@@ -217,7 +217,7 @@
       h('button', { class: 'lnk', type: 'button', text: 'Password', onclick: function () { guard(function () { renderPassword(false); }); } }),
       h('button', { class: 'lnk', type: 'button', text: 'Sign out', onclick: function () { guard(signOut); } }));
 
-    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv']] : []);
+    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv']] : [], me.role === 'admin' ? [['settings', 'Settings', '#/settings']] : []);
     tabsEl = h('nav', { class: 'tabs', 'aria-label': 'Workspaces' }, windows.map(function (w) {
       return h('button', { class: 'tab', type: 'button', 'data-v': w[0], onclick: function () { guard(function () { if (location.hash === w[2] || (w[0] === 'articles' && !location.hash)) route(); else location.hash = w[2]; }); } },
         w[1], w[0] === 'radio' || w[0] === 'tv' ? h('i', { class: 'dot', title: 'On air' }) : null);
@@ -274,6 +274,12 @@
   window.addEventListener('hashchange', function () { if (me.role) route(); });
 
   function route() {
+    if (location.hash === '#/settings') {
+      if (me.role !== 'admin') { location.hash = ''; return; }
+      if (dashCleanup) { dashCleanup(); dashCleanup = null; }
+      current = null; dirty = false; view = 'settings';
+      stage.replaceChildren(showSettings()); paintTabs(); return;
+    }
     var dm = location.hash.match(/^#\/(radio|tv)$/);
     if (dm) {
       if (!canPublish()) { location.hash = ''; return; }
@@ -642,6 +648,120 @@
           opt('echo', 'Echo cancellation'), opt('noise', 'Noise suppression'), opt('agc', 'Automatic volume levelling'),
           h('p', { class: 'hint', text: 'Use headphones when you test so the radio does not echo into your microphone.' })),
         musicPanel(kind, S, save, stops)));
+  }
+
+  /* ---------------------------------------------------------------- settings window (admins) */
+  function callLiveFn(body) {
+    return sb.auth.getSession().then(function (s) {
+      var tok = s.data && s.data.session && s.data.session.access_token;
+      return fetch(cfg.url.replace(/\/+$/, '') + '/functions/v1/livekit-token', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.anon_key, Authorization: 'Bearer ' + tok }, body: JSON.stringify(body) });
+    }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { j.status = r.status; return j; }); });
+  }
+  function deepMerge(a, b) {
+    var o = JSON.parse(JSON.stringify(a || {}));
+    (function m(x, y) { Object.keys(y || {}).forEach(function (k) { if (y[k] && typeof y[k] === 'object' && !Array.isArray(y[k]) && x[k] && typeof x[k] === 'object') m(x[k], y[k]); else x[k] = y[k]; }); })(o, b || {});
+    return o;
+  }
+  function showSettings() {
+    var box = h('div', { class: 'dash settings' }, h('div', { class: 'empty', text: 'Loading settings…' }));
+    Promise.all([sb.from('site_settings').select('data').eq('id', 1).maybeSingle(), sb.rpc('secret_status')]).then(function (res) {
+      if (res[0].error) {
+        return box.replaceChildren(h('div', { class: 'msg err', text: /relation|does not exist|schema cache|permission/i.test(res[0].error.message || '') ? 'Settings are not set up yet. Run supabase/settings.sql in the Supabase SQL Editor (see the README), then reload.' : errText(res[0].error) }));
+      }
+      var V = deepMerge(cfg.site || {}, (res[0].data && res[0].data.data) || {});
+      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {};
+      var st = {}; (res[1].data || []).forEach(function (x) { st[x.key] = x; });
+      var mark = function () { dirty = true; dirtyEl.textContent = 'Unsaved changes'; };
+      var dirtyEl = h('span', { class: 'dirty' });
+      function bind(obj, key, type, extra) {
+        var i = h('input', { type: type || 'text', value: obj[key] == null ? '' : obj[key], oninput: function () { obj[key] = type === 'number' ? (i.value === '' ? '' : i.value * 1) : i.value; mark(); } });
+        Object.keys(extra || {}).forEach(function (k) { i.setAttribute(k, extra[k]); });
+        return i;
+      }
+      function tick(obj, key, label) { var c = check(label, !!obj[key], function () { obj[key] = c.input.checked; mark(); }); return c.box; }
+      var nav = h('input', { type: 'text', value: (V.nav_order || []).join(', '), placeholder: 'Politics, Business, Sport', oninput: function () { V.nav_order = nav.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean); mark(); } });
+      var custom = h('textarea', { placeholder: 'One headline per line. Optional link after a bar:\nPlain headline\nWith link | a/some-article.html',
+        oninput: function () { V.ticker.custom = custom.value.split('\n').map(function (l) { var p = l.split('|'); var t = p[0].trim(); return !t ? null : p[1] && p[1].trim() ? { text: t, url: p.slice(1).join('|').trim() } : t; }).filter(Boolean); mark(); } });
+      custom.value = (V.ticker.custom || []).map(function (c) { return typeof c === 'string' ? c : c.text + (c.url ? ' | ' + c.url : ''); }).join('\n');
+      var mode = h('select', { onchange: function () { V.ticker.tab.mode = mode.value; mark(); } }, h('option', { value: 'scroll', text: 'Text slides along' }), h('option', { value: 'headline', text: 'One headline at a time' }));
+      mode.value = V.ticker.tab.mode || 'scroll';
+
+      var saveBtn = h('button', { class: 'btn primary', type: 'button', text: 'Save settings', onclick: function () {
+        saveBtn.disabled = true;
+        sb.rpc('settings_save', { p_data: V }).then(function (r) {
+          saveBtn.disabled = false;
+          if (r.error) return toast(errText(r.error), true);
+          dirty = false; dirtyEl.textContent = '';
+          toast(rebuildReady ? 'Saved. The website updates in about a minute.' : 'Saved. Press "Update website" (top right) to apply it to the website.');
+        });
+      } });
+
+      /* keys: write-only; the saved secret is never sent back to the browser */
+      function keyBox(name, label, type, hintText, isUrl) {
+        var s = st[name] || {}, i = h('input', { type: type, autocomplete: 'off', spellcheck: 'false', value: isUrl || name === 'livekit_api_key' ? (s.hint || '') : '',
+          placeholder: s.is_set ? 'Saved (' + (s.hint || '') + '). Type a new one to replace it.' : 'Not set' });
+        i.dataset.orig = i.value;
+        return { name: name, input: i, field: field(label, i, hintText), saved: !!s.is_set };
+      }
+      var lk = [keyBox('livekit_url', 'LiveKit address', 'text', 'Looks like wss://yourproject.livekit.cloud (LiveKit Cloud > Settings).', true),
+                keyBox('livekit_api_key', 'API key', 'text', 'From LiveKit Cloud > Settings > Keys.'),
+                keyBox('livekit_api_secret', 'API secret', 'password', 'Only shown once by LiveKit. It is stored where the website and the editor cannot read it.')];
+      var gh = keyBox('github_token', 'GitHub token', 'password', 'A fine-grained token for the repository "news" with Actions: Read and write. See the README.');
+      var lkMsg = h('p', { class: 'hint' }), ghMsg = h('p', { class: 'hint' });
+      function saveKeys(list, msgEl, label) {
+        var jobs = list.filter(function (k) { var v = k.input.value.trim(); return v !== (k.input.dataset.orig || '') && (v || k.saved); });
+        if (!jobs.length) { msgEl.textContent = 'Nothing to save.'; return Promise.resolve(false); }
+        for (var n = 0; n < jobs.length; n++) if (jobs[n].name === 'livekit_url' && jobs[n].input.value.trim() && !/^(wss?|https?):\/\//i.test(jobs[n].input.value.trim())) { msgEl.textContent = 'The address must start with wss:// (or https://).'; return Promise.resolve(false); }
+        return jobs.reduce(function (p, k) { return p.then(function () { return sb.rpc('secret_set', { p_key: k.name, p_value: k.input.value.trim() }).then(function (r) { if (r.error) throw r.error; }); }); }, Promise.resolve())
+          .then(function () { msgEl.textContent = label + ' saved.'; toast(label + ' saved'); list.forEach(function (k) { if (k.input.type === 'password') k.input.value = ''; else k.input.dataset.orig = k.input.value.trim(); if (k.input.value || k.input.type !== 'password') k.saved = true; }); return true; })
+          .catch(function (e) { msgEl.textContent = ''; toast(errText(e), true); return false; });
+      }
+      var testBtn = h('button', { class: 'btn', type: 'button', text: 'Test connection', onclick: function () {
+        testBtn.disabled = true; lkMsg.textContent = 'Testing…'; lkMsg.className = 'hint';
+        saveKeys(lk, lkMsg, 'LiveKit details').then(function () { return callLiveFn({ mode: 'check' }); }).then(function (j) {
+          testBtn.disabled = false;
+          if (j.status === 404) { lkMsg.textContent = 'The livekit-token function is not deployed yet (see the README).'; lkMsg.className = 'hint err'; }
+          else if (j.ok) { lkMsg.textContent = 'Connected to LiveKit. Live radio and TV are ready.'; lkMsg.className = 'hint ok'; }
+          else { lkMsg.textContent = j.error || 'The connection test failed.'; lkMsg.className = 'hint err'; }
+        });
+      } });
+
+      box.replaceChildren(
+        h('div', { class: 'dashhead' }, h('h2', { text: 'Settings' }), dirtyEl, h('span', { class: 'sp' }), saveBtn),
+        h('p', { class: 'hint', text: 'Changes to the website settings go live after the next website update (automatic when instant updates are set up).' }),
+        h('div', { class: 'setgrid' },
+          h('section', { class: 'panel' }, h('h3', { text: 'Website' }),
+            field('Site name', bind(V, 'site_name', 'text', { maxlength: 80 })),
+            h('div', { class: 'row2' }, field('Logo, first part', bind(V, 'logo_left', 'text', { maxlength: 40 })), field('Logo, second part', bind(V, 'logo_right', 'text', { maxlength: 40 }))),
+            field('Tagline', bind(V, 'tagline', 'text', { maxlength: 200 })), field('Footer text', bind(V, 'footer_text', 'text', { maxlength: 400 })),
+            field('Public address of the website', bind(V, 'base_url', 'url'), 'Used for sharing previews, for example https://victor-stanovoy.github.io/news')),
+          h('section', { class: 'panel' }, h('h3', { text: 'Homepage and menu' }),
+            h('div', { class: 'row2' }, field('Sections in the menu', bind(V, 'nav_max', 'number', { min: 1, max: 20 })), field('Sections on the homepage', bind(V, 'home_category_sections', 'number', { min: 0, max: 20 }))),
+            h('div', { class: 'row2' }, field('Items in "Most read"', bind(V, 'most_read_count', 'number', { min: 1, max: 20 })), field('Breaking banner hides after (days, 0 = never)', bind(V, 'breaking_max_age_days', 'number', { min: 0, max: 365 }))),
+            field('Menu order', nav, 'Section names, separated by commas. Sections not listed follow after.')),
+          h('section', { class: 'panel' }, h('h3', { text: 'Tickers' }),
+            tick(V.ticker, 'enabled', 'Show the headline bar under the menu'),
+            h('div', { class: 'row2' }, field('Tag text', bind(V.ticker, 'label', 'text', { maxlength: 30 })), field('Headlines shown', bind(V.ticker, 'count', 'number', { min: 1, max: 30 }))),
+            field('Speed (pixels per second)', bind(V.ticker, 'speed', 'number', { min: 10, max: 300 })),
+            field('Own headlines instead of the newest articles', custom),
+            tick(V.ticker.tab, 'enabled', 'Browser tab title becomes a ticker when a visitor leaves the page'),
+            h('div', { class: 'row2' }, field('Tab ticker style', mode), field('Symbol before headlines', bind(V.ticker.tab, 'prefix', 'text', { maxlength: 10 })))),
+          h('section', { class: 'panel' }, h('h3', { text: 'Live radio and TV' }),
+            tick(V.live, 'enabled', 'Show the Live page and menu link'),
+            h('p', { class: 'hint', text: 'Connection to LiveKit (the service that carries the broadcast).' }),
+            lk.map(function (k) { return k.field; }), lkMsg,
+            h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save LiveKit details', onclick: function () { saveKeys(lk, lkMsg, 'LiveKit details'); } }), testBtn)),
+          h('section', { class: 'panel' }, h('h3', { text: 'Instant website updates' }),
+            h('p', { class: 'hint', text: gh.saved ? 'A token is saved. Publishing starts a website update by itself.' : 'No token saved yet, so the website only updates when you press "Update website" or at the next hourly rebuild.' }),
+            gh.field, ghMsg,
+            h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save token', onclick: function () { saveKeys([gh], ghMsg, 'GitHub token').then(function (ok) { if (ok) rebuildReady = true; }); } }),
+              h('button', { class: 'btn', type: 'button', text: 'Update website now', onclick: updateSite }))),
+          h('section', { class: 'panel' }, h('h3', { text: 'Database connection' }),
+            h('p', { class: 'hint', text: 'The address and public key of the Supabase database are kept in site.json on GitHub, because the editor needs them to log in at all.' }),
+            h('div', { class: 'kv' }, h('span', { text: 'Address' }), h('code', { text: cfg.url })))));
+    });
+    return box;
   }
 
   /* ---------------------------------------------------------------- team panel (admins) */
