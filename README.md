@@ -93,6 +93,25 @@ One-time setup (about 15 minutes):
 
 Tips: use headphones while testing so the radio does not echo into your microphone. Keep the editor page open while broadcasting.
 
+## Newsletter (compose, send, sign-up box)
+
+The **Newsletter** window in the editor lets admins and editors build an email from a template (Daily digest, Top story, Cards, Letter, Alert) or paste your own HTML, preview it on desktop and phone, send a test, and send it to everyone confirmed. The **Design** tab changes colors, font, width, header, buttons, logo, footer and social links for all templates.
+
+One-time setup:
+
+1. Supabase → SQL Editor → run `supabase/newsletter.sql` (and `supabase/settings.sql` again, it now knows the Brevo key).
+2. Deploy the function: Edge Functions → new function named `newsletter` → paste `supabase/functions/newsletter/index.ts` → turn **Verify JWT off** (the function checks who is calling by itself).
+3. Make a free account at brevo.com, verify your sender address (Senders & IP), then create an API key (SMTP & API → API keys).
+4. Editor → Settings → Newsletter: paste the Brevo key, press **Test Brevo connection**, tick **Show the sign-up box on the website**, press Save (this also saves your site address, which the confirm and unsubscribe links need).
+5. Editor → Newsletter → Design: set the sender name, sender email (the one verified in Brevo) and your postal address, then Save.
+
+Good to know:
+
+- Sign-up uses double opt-in: people get a confirmation email first. Every email gets an unsubscribe link automatically, even pasted HTML.
+- Brevo's free plan sends about 300 emails a day. A bigger list sends in several rounds; the Send dialog resumes where it stopped.
+- Placeholders in your text: `{{name}}`, `{{email}}`, `{{unsubscribe_url}}`.
+- Only add people who agreed to receive email (the Add box asks you to confirm this). Keep a real postal address in the footer; many countries require it.
+
 ## Adding articles with CSV files
 
 1. Put a `.csv` file in `articles/` (any file name; one file can hold many articles, one per row).

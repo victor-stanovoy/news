@@ -57,6 +57,8 @@ DEFAULT_CONFIG = {
     "nav_max": 8,                   # sections shown in the menu; the rest go under "More"
     "nav_order": [],                # optional: categories listed first in the menu
     "footer_text": "",
+    "newsletter": {"enabled": False,            # subscribe box in the footer and the /newsletter/ page (set up in the editor first)
+                   "title": "Get the newsletter", "blurb": "The best of our reporting in your inbox. Free, and you can leave at any time."},
     "live": {"enabled": True},      # "Live" page for live radio and TV (needs the database and supabase/live.sql)
     "supabase": {"url": "", "anon_key": ""},   # the editor and database; both values are safe to publish
     "ticker": {
@@ -434,6 +436,12 @@ def clean_settings(d):
             out[k] = _int(d[k], lo, hi, DEFAULT_CONFIG[k])
     if isinstance(d.get("nav_order"), list):
         out["nav_order"] = [_str(x, 80) for x in d["nav_order"][:40] if isinstance(x, str) and x.strip()]
+    if isinstance(d.get("newsletter"), dict):
+        nl = d["newsletter"]; o = {}
+        if "enabled" in nl: o["enabled"] = bool(nl["enabled"])
+        if isinstance(nl.get("title"), str) and nl["title"].strip(): o["title"] = _str(nl["title"], 80)
+        if isinstance(nl.get("blurb"), str): o["blurb"] = _str(nl["blurb"], 240)
+        out["newsletter"] = o
     if isinstance(d.get("live"), dict) and "enabled" in d["live"]:
         out["live"] = {"enabled": bool(d["live"]["enabled"])}
     t = d.get("ticker")
@@ -664,6 +672,29 @@ class Site:
                 f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}<link rel="icon" href="{icon}">'
                 f'<link rel="stylesheet" href="{root}assets/style.css?v={asset_ver("style.css")}"></head>')
 
+    def nl_on(self):
+        return bool(self.cfg["newsletter"].get("enabled")) and bool(db_settings(self.cfg)[0])
+
+    def nlbox(self, root):
+        if not self.nl_on():
+            return ""
+        n = self.cfg["newsletter"]
+        return (f'<section class="nlbox" aria-labelledby="nl-h"><div class="wrap nlin"><div><h2 id="nl-h">{esc(n["title"])}</h2><p>{esc(n["blurb"])}</p></div>'
+                f'<form class="nlform" data-nl novalidate><label class="sr" for="nl-mail">Email address</label>'
+                f'<input id="nl-mail" type="email" name="email" placeholder="you@example.com" autocomplete="email" required>'
+                f'<input class="hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">'
+                f'<button type="submit">Subscribe</button><p class="nlmsg" role="status"></p></form></div></section>')
+
+    def newsletter_page(self):
+        n = self.cfg["newsletter"]
+        body = (f'<div class="wrap nlpage"><h1>{esc(n["title"])}</h1><div id="nl-state"><p class="lead">{esc(n["blurb"])}</p>'
+                f'<form class="nlform big" data-nl novalidate><label class="sr" for="nl-mail2">Email address</label>'
+                f'<input id="nl-mail2" type="email" name="email" placeholder="you@example.com" autocomplete="email" required>'
+                f'<input class="hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">'
+                f'<button type="submit">Subscribe</button><p class="nlmsg" role="status"></p></form>'
+                f'<p class="small">We send a confirmation email first. Every email has an unsubscribe link.</p></div></div>')
+        return self.page("Newsletter", body, "../")
+
     def live_on(self):
         return bool(self.cfg["live"].get("enabled")) and bool(db_settings(self.cfg)[0])
 
@@ -712,7 +743,7 @@ class Site:
         cfg = self.cfg
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
-        return (f'<footer class="foot"><div class="wrap"><div class="fcats">{cats}</div>{extra}'
+        return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><div class="fcats">{cats}</div>{extra}'
                 f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
 
     def ticker_entries(self, root):
@@ -748,9 +779,14 @@ class Site:
         if self.live_on():
             u, k = db_settings(self.cfg)
             data["live"] = {"url": u, "key": k}
+        nl_tag = ""
+        if self.nl_on():
+            u, k = db_settings(self.cfg)
+            data["nl"] = {"url": u, "key": k}
+            nl_tag = f'<script src="{root}assets/newsletter.js?v={asset_ver("newsletter.js")}" defer></script>'
         blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
         return (f'<script id="spark-ticker-data" type="application/json">{blob}</script>'
-                f'<script src="{root}assets/site.js?v={asset_ver("site.js")}" defer></script>')
+                f'<script src="{root}assets/site.js?v={asset_ver("site.js")}" defer></script>' + nl_tag)
 
     def page(self, title, body, root, active="", **kw):
         return (self.head(title, root, **kw) + self.header(root, active) + self.ticker(root)
@@ -1015,13 +1051,17 @@ def main():
         (OUT / "editor").mkdir()
         url, key = db_settings(cfg)
         site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
-                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live")
-        conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys}}, ensure_ascii=False).replace("</", "<\\/")
+                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter")
+        conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys},
+                           "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
                 .replace("{{CSS_VER}}", asset_ver("editor.css")).replace("{{JS_VER}}", asset_ver("editor.js")))
         w("editor/index.html", page)
     w("index.html", site.home())
     w("search.html", site.search_page())
+    if site.nl_on():
+        (OUT / "newsletter").mkdir()
+        w("newsletter/index.html", site.newsletter_page())
     if site.live_on():
         (OUT / "live").mkdir()
         w("live/index.html", site.live_page())

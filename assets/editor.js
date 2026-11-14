@@ -164,7 +164,7 @@
       h('p', { text: 'You are signed in as ' + me.email + ', but this account has not been given a role yet. Ask an admin to add this email in the Team panel, then reload this page.' }),
       h('button', { class: 'btn wide', text: 'Sign out', onclick: signOut }))));
   }
-  function signOut() { stopLive('radio'); stopLive('tv'); view = ''; sb.auth.signOut().then(function () { articles = []; current = null; renderLogin(); }); }
+  function signOut() { stopLive('radio'); stopLive('tv'); view = ''; nlRoot = null; nlDirty = false; sb.auth.signOut().then(function () { articles = []; current = null; renderLogin(); }); }
 
   /* ---------------------------------------------------------------- data */
   function loadArticles() {
@@ -217,7 +217,7 @@
       h('button', { class: 'lnk', type: 'button', text: 'Password', onclick: function () { guard(function () { renderPassword(false); }); } }),
       h('button', { class: 'lnk', type: 'button', text: 'Sign out', onclick: function () { guard(signOut); } }));
 
-    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv']] : [], me.role === 'admin' ? [['settings', 'Settings', '#/settings']] : []);
+    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['newsletter', 'Newsletter', '#/newsletter']] : [], me.role === 'admin' ? [['settings', 'Settings', '#/settings']] : []);
     tabsEl = h('nav', { class: 'tabs', 'aria-label': 'Workspaces' }, windows.map(function (w) {
       return h('button', { class: 'tab', type: 'button', 'data-v': w[0], onclick: function () { guard(function () { if (location.hash === w[2] || (w[0] === 'articles' && !location.hash)) route(); else location.hash = w[2]; }); } },
         w[1], w[0] === 'radio' || w[0] === 'tv' ? h('i', { class: 'dot', title: 'On air' }) : null);
@@ -279,6 +279,14 @@
       if (dashCleanup) { dashCleanup(); dashCleanup = null; }
       current = null; dirty = false; view = 'settings';
       stage.replaceChildren(showSettings()); paintTabs(); return;
+    }
+    if (location.hash === '#/newsletter') {
+      if (!canPublish()) { location.hash = ''; return; }
+      if (dashCleanup) { dashCleanup(); dashCleanup = null; }
+      current = null; dirty = false; view = 'newsletter';
+      stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'empty', text: 'Loading…' }))); paintTabs();
+      showNewsletter().then(function (el) { if (view === 'newsletter') stage.replaceChildren(el); }).catch(function (e) { stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'msg err', text: errText(e) }))); });
+      return;
     }
     var dm = location.hash.match(/^#\/(radio|tv)$/);
     if (dm) {
@@ -467,7 +475,7 @@
       }).then(function () { return got; });
     });
   }
-  window.addEventListener('beforeunload', function (e) { if (onAir.radio || onAir.tv) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('beforeunload', function (e) { if (onAir.radio || onAir.tv || nlDirty) { e.preventDefault(); e.returnValue = ''; } });
 
   /* the "Music & jingles" panel of a studio */
   var micMuted = { radio: false, tv: false };
@@ -650,6 +658,35 @@
         musicPanel(kind, S, save, stops)));
   }
 
+  /* ---------------------------------------------------------------- newsletter window */
+  function callFunction(name, body) {
+    return sb.auth.getSession().then(function (s) {
+      var tok = s.data && s.data.session && s.data.session.access_token;
+      return fetch(cfg.url.replace(/\/+$/, '') + '/functions/v1/' + name, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.anon_key, Authorization: 'Bearer ' + tok }, body: JSON.stringify(body) });
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        j.status = r.status;
+        if (r.status === 404 && !j.error) j.error = 'The "' + name + '" function is not deployed yet. See the README.';
+        return j;
+      });
+    }).catch(function () { return { error: 'No connection to the function. Check your internet and the function setup.' }; });
+  }
+  var nlLoading = null, nlRoot = null, nlDirty = false;
+  function loadScript(src) {
+    return new Promise(function (ok, no) { var el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = function () { no(new Error('Could not load ' + src)); }; document.head.appendChild(el); });
+  }
+  function showNewsletter() {
+    var v = cfg.ver || {};
+    if (!nlLoading) nlLoading = loadScript('../assets/email-templates.js?v=' + (v.tpl || '')).then(function () { return loadScript('../assets/newsletter-editor.js?v=' + (v.nl || '')); }).catch(function (e) { nlLoading = null; throw e; });
+    return nlLoading.then(function () {
+      if (nlRoot) return nlRoot;                      /* keep a half-written newsletter when you visit another window and come back */
+      nlRoot = window.SparkNL.mount({ h: h, field: field, check: check, toast: toast, sb: sb, cfg: cfg, me: me, errText: errText, fmtDate: fmtDate,
+        getArticles: function () { return articles; }, callFn: callFunction, setDirty: function (d) { nlDirty = d; } });
+      return nlRoot;
+    });
+  }
+
   /* ---------------------------------------------------------------- settings window (admins) */
   function callLiveFn(body) {
     return sb.auth.getSession().then(function (s) {
@@ -670,7 +707,7 @@
         return box.replaceChildren(h('div', { class: 'msg err', text: /relation|does not exist|schema cache|permission/i.test(res[0].error.message || '') ? 'Settings are not set up yet. Run supabase/settings.sql in the Supabase SQL Editor (see the README), then reload.' : errText(res[0].error) }));
       }
       var V = deepMerge(cfg.site || {}, (res[0].data && res[0].data.data) || {});
-      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {};
+      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {}; V.newsletter = V.newsletter || {};
       var st = {}; (res[1].data || []).forEach(function (x) { st[x.key] = x; });
       var mark = function () { dirty = true; dirtyEl.textContent = 'Unsaved changes'; };
       var dirtyEl = h('span', { class: 'dirty' });
@@ -707,6 +744,16 @@
       var lk = [keyBox('livekit_url', 'LiveKit address', 'text', 'Looks like wss://yourproject.livekit.cloud (LiveKit Cloud > Settings).', true),
                 keyBox('livekit_api_key', 'API key', 'text', 'From LiveKit Cloud > Settings > Keys.'),
                 keyBox('livekit_api_secret', 'API secret', 'password', 'Only shown once by LiveKit. It is stored where the website and the editor cannot read it.')];
+      var bv = keyBox('brevo_api_key', 'Brevo API key', 'password', 'From Brevo > your name > SMTP & API > API keys. It is stored where the website and the editor pages cannot read it.');
+      var bvMsg = h('p', { class: 'hint' });
+      var bvTest = h('button', { class: 'btn', type: 'button', text: 'Test Brevo connection', onclick: function () {
+        bvTest.disabled = true; bvMsg.className = 'hint'; bvMsg.textContent = 'Testing…';
+        saveKeys([bv], bvMsg, 'Brevo key').then(function () { return callFunction('newsletter', { mode: 'check' }); }).then(function (j) {
+          bvTest.disabled = false;
+          if (j.ok) { bvMsg.className = 'hint ok'; bvMsg.textContent = 'Connected to Brevo (' + (j.account || 'account') + ')' + (j.credits != null ? ', ' + j.credits + ' emails left' : '') + (j.sender_ok ? '.' : '. Now set the sender in Newsletter > Design.'); }
+          else { bvMsg.className = 'hint err'; bvMsg.textContent = j.error || 'The connection test failed.'; }
+        });
+      } });
       var gh = keyBox('github_token', 'GitHub token', 'password', 'A fine-grained token for the repository "news" with Actions: Read and write. See the README.');
       var lkMsg = h('p', { class: 'hint' }), ghMsg = h('p', { class: 'hint' });
       function saveKeys(list, msgEl, label) {
@@ -752,6 +799,11 @@
             h('p', { class: 'hint', text: 'Connection to LiveKit (the service that carries the broadcast).' }),
             lk.map(function (k) { return k.field; }), lkMsg,
             h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save LiveKit details', onclick: function () { saveKeys(lk, lkMsg, 'LiveKit details'); } }), testBtn)),
+          h('section', { class: 'panel' }, h('h3', { text: 'Newsletter' }),
+            tick(V.newsletter, 'enabled', 'Show the sign-up box on the website (turn on after Brevo is connected)'),
+            field('Box title', bind(V.newsletter, 'title', 'text', { maxlength: 80, placeholder: 'Get the newsletter' })), field('Box text', bind(V.newsletter, 'blurb', 'text', { maxlength: 240 })),
+            bv.field, bvMsg, h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save Brevo key', onclick: function () { saveKeys([bv], bvMsg, 'Brevo key'); } }), bvTest),
+            h('p', { class: 'hint', text: 'Write and send newsletters in the Newsletter tab. Sender name, email and the look of the emails are set there under Design.' })),
           h('section', { class: 'panel' }, h('h3', { text: 'Instant website updates' }),
             h('p', { class: 'hint', text: gh.saved ? 'A token is saved. Publishing starts a website update by itself.' : 'No token saved yet, so the website only updates when you press "Update website" or at the next hourly rebuild.' }),
             gh.field, ghMsg,

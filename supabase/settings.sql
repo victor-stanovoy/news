@@ -30,7 +30,7 @@ begin
   if jsonb_typeof(p_data) is distinct from 'object' then raise exception 'Settings must be an object'; end if;
   select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into clean from jsonb_each(p_data) as t(k, v)
    where k = any (array['site_name','logo_left','logo_right','tagline','language','base_url','footer_text','nav_max','nav_order',
-                        'home_category_sections','most_read_count','breaking_max_age_days','ticker','live']);
+                        'home_category_sections','most_read_count','breaking_max_age_days','ticker','live','newsletter']);
   update public.site_settings set data = clean, updated_at = now(), updated_by = auth.uid() where id = 1;
   -- rebuild the website if instant updates are set up (ignored otherwise)
   begin
@@ -50,7 +50,7 @@ begin
                 when k.key = 'livekit_url' then s.value
                 when k.key = 'livekit_api_key' then s.value
                 else '...' || right(s.value, 4) end
-    from (values ('livekit_url'), ('livekit_api_key'), ('livekit_api_secret'), ('github_token')) as k(key)
+    from (values ('livekit_url'), ('livekit_api_key'), ('livekit_api_secret'), ('github_token'), ('brevo_api_key')) as k(key)
     left join public.app_secrets s on s.key = k.key;
 end $$;
 
@@ -58,7 +58,7 @@ create or replace function public.secret_set(p_key text, p_value text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   if public.editor_role() is distinct from 'admin' then raise exception 'Only admins can change keys'; end if;
-  if p_key not in ('livekit_url', 'livekit_api_key', 'livekit_api_secret', 'github_token') then raise exception 'Unknown setting'; end if;
+  if p_key not in ('livekit_url', 'livekit_api_key', 'livekit_api_secret', 'github_token', 'brevo_api_key') then raise exception 'Unknown setting'; end if;
   if nullif(trim(p_value), '') is null then delete from public.app_secrets where key = p_key;
   else insert into public.app_secrets (key, value) values (p_key, trim(p_value))
        on conflict (key) do update set value = excluded.value; end if;
