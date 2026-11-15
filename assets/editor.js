@@ -207,7 +207,7 @@
   function renderWork() {
     var bar = h('div', { class: 'bar' },
       h('a', { class: 'brand', href: '../index.html' },
-        (function () { var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); var p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', SPARK); s.appendChild(p); return s; })(),
+        h('img', { src: '../assets/logo.png', alt: '', width: '26', height: '26' }),
         'SparkNews', h('small', { text: 'Editor' })),
       h('span', { class: 'sp' }),
       h('span', { class: 'who' }, me.name || me.email, h('b', { text: me.role })),
@@ -742,7 +742,7 @@
         var fs = Math.round(H * 0.052), pad = Math.round(fs * 0.55), bh = fs + pad * 2, by = H - bh - Math.round(H * 0.07), bx = Math.round(W * 0.04);
         g.font = '700 ' + fs + 'px Georgia, "Times New Roman", serif';
         var tw = Math.min(g.measureText(C.caption).width, W * 0.78), bw = tw + pad * 2 + 10;
-        g.fillStyle = 'rgba(14,17,22,.88)'; g.fillRect(bx, by, bw, bh); g.fillStyle = '#ff6a2b'; g.fillRect(bx, by, 10, bh);
+        g.fillStyle = 'rgba(14,17,22,.88)'; g.fillRect(bx, by, bw, bh); g.fillStyle = '#fe2c55'; g.fillRect(bx, by, 10, bh);
         g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.fillText(C.caption, bx + pad + 10, by + bh / 2, W * 0.78);
       }
     }

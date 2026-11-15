@@ -12,7 +12,7 @@
   };
 
   var DESIGN = {
-    brand: '#d9400a', header_bg: '#0e1116', header_text: '#ffffff', page_bg: '#f4f5f7', card_bg: '#ffffff',
+    brand: '#d4163f', header_bg: '#110c4a', header_text: '#ffffff', page_bg: '#f5f4fa', card_bg: '#ffffff',
     text: '#1f2933', muted: '#6b7280', line: '#e4e7ec', link: '',
     font: 'classic', width: 600, radius: 10, button: 'pill', header_style: 'banner',
     logo_url: '', show_name: true, tagline: '',

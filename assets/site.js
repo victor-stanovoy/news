@@ -130,3 +130,10 @@ window.addEventListener('error', function (e) { window.__sparkErrors.push(e.mess
     ].join('\n');
   }, 400);
 })();
+
+/* shadow under the section bar once it sticks to the top */
+(function () {
+  var nb = document.querySelector('.navbar'); if (!nb) return;
+  function f() { nb.classList.toggle('stuck', nb.getBoundingClientRect().top <= 0 && window.scrollY > 0); }
+  window.addEventListener('scroll', f, { passive: true }); f();
+})();

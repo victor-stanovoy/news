@@ -54,8 +54,8 @@ function withUnsubscribe(html: string, siteName: string, address: string): strin
 }
 
 function simpleMail(site: string, d: Record<string, string>, title: string, body: string, btnText = "", btnUrl = ""): string {
-  const brand = /^#[0-9a-f]{6}$/i.test(d.brand || "") ? d.brand : "#d9400a";
-  const head = /^#[0-9a-f]{6}$/i.test(d.header_bg || "") ? d.header_bg : "#0e1116";
+  const brand = /^#[0-9a-f]{6}$/i.test(d.brand || "") ? d.brand : "#d4163f";
+  const head = /^#[0-9a-f]{6}$/i.test(d.header_bg || "") ? d.header_bg : "#110c4a";
   const btn = btnUrl ? `<p style="margin:24px 0"><a href="${esc(btnUrl)}" style="background:${brand};color:#ffffff;text-decoration:none;font-weight:bold;padding:13px 26px;border-radius:6px;display:inline-block">${esc(btnText)}</a></p>` +
     `<p style="margin:0;color:#6b7280;font-size:13px">Or copy this link into your browser:<br>${esc(btnUrl)}</p>` : "";
   return `<!doctype html><html><body style="margin:0;background:#f4f5f7"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#f4f5f7"><tr><td align="center" style="padding:24px 12px">` +

@@ -663,13 +663,16 @@ class Site:
         if base and path:
             og += f'<link rel="canonical" href="{esc(base + "/" + path)}"><meta property="og:url" content="{esc(base + "/" + path)}">'
         alt = "".join(f'<link rel="alternate" hreflang="{l}" href="{esc(base + "/" + u if base else u)}">' for l, u in (alts or []))
-        icon = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230e1116'/%3E"
-                "%3Cpath transform='translate(3 3) scale(.75)' fill='%23ff6a2b' d='" + SPARK_PATH + "'/%3E%3C/svg%3E")
+        icon = (f'<link rel="icon" type="image/png" sizes="64x64" href="{root}assets/favicon.png?v={asset_ver("favicon.png")}">'
+                f'<link rel="apple-touch-icon" href="{root}assets/apple-touch-icon.png?v={asset_ver("apple-touch-icon.png")}">'
+                f'<meta name="theme-color" content="#110c4a">')
+        if base and not (image and image.startswith("http")):
+            og += f'<meta property="og:image" content="{esc(base)}/assets/og-default.png"><meta name="twitter:card" content="summary_large_image">'
         return (f'<!doctype html><html lang="{esc(cfg["language"])}"><head><meta charset="utf-8">'
                 f'<meta name="viewport" content="width=device-width,initial-scale=1">'
                 f'<meta name="color-scheme" content="light dark">'
                 f'<script>try{{var th=localStorage.getItem("spark-theme");if(th)document.documentElement.dataset.theme=th}}catch(e){{}}</script>'
-                f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}<link rel="icon" href="{icon}">'
+                f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}{icon}'
                 f'<link rel="stylesheet" href="{root}assets/style.css?v={asset_ver("style.css")}"></head>')
 
     def nl_on(self):
@@ -730,7 +733,7 @@ class Site:
         if cfg["logo_left"]:
             tm = "<sup>™</sup>" if "™" in cfg["site_name"] else ""
             logo = (f'<a class="logo" href="{root}index.html" aria-label="{esc(cfg["site_name"])} home">'
-                    f'<svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><path d="{SPARK_PATH}"/></svg>'
+                    f'<img class="spark" src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="40" height="40" alt="">'
                     f'<span><b>{esc(cfg["logo_left"])}</b>{esc(cfg["logo_right"])}{tm}</span></a>')
         else:
             logo = f'<a class="logo" href="{root}index.html">{esc(cfg["site_name"])}</a>'
@@ -744,16 +747,17 @@ class Site:
                     if self.live_on() else "")
         return f'''<body><a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="wrap bar">
+<span class="dateline">{self.now.strftime("%A, %B ") + str(self.now.day) + self.now.strftime(", %Y")}</span>
 {logo}
 <div class="tools"><form class="search" action="{root}search.html" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"><button aria-label="Search">&#9906;</button></form><button class="theme" type="button" aria-label="Switch light / dark mode" title="Light / dark"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M12 3.5a8.5 8.5 0 0 1 0 17z"/></svg></button></div>
 </div>
-<nav class="wrap menu" aria-label="Sections"><a href="{root}index.html"{" class=on" if active == "" else ""}>Home</a>{livelink}{nav}</nav></header>'''
+</header><div class="navbar"><nav class="wrap menu" aria-label="Sections"><a href="{root}index.html"{" class=on" if active == "" else ""}>Home</a>{livelink}{nav}</nav></div>'''
 
     def footer(self, root):
         cfg = self.cfg
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
-        return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><div class="fcats">{cats}</div>{extra}'
+        return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
                 f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
 
     def ticker_entries(self, root):

@@ -106,6 +106,10 @@ No account or key is needed. Songs licensed "CC BY" or "CC BY-SA" require credit
 
 The Live page for visitors has a TV player (play, volume, mute, full screen) and a radio player (equalizer, on-air time, the current song), updates every 10 seconds, reconnects after a weak connection, and shows the latest stories when nothing is live. Keyboard: `M` mutes, `F` goes full screen.
 
+### Look and feel
+
+The public site uses a newspaper-style layout: a light masthead with your logo and the date, a sticky section bar, serif headlines, thin dividing rules, and compact story rows on phones. The logo and icons are in `assets/logo.png`, `assets/favicon.png`, `assets/apple-touch-icon.png` and `assets/og-default.png` (shown when a page is shared); replace those files to change them. The colors are the variables at the top of `assets/style.css` (`--head` indigo, `--spark` and `--accent` pink).
+
 ### TV studio: pictures, videos, screen and captions
 
 Set **Source** to *Studio* in the TV studio window. You get a program picture (exactly what the audience sees), six scenes (keys 1 to 6): **Camera**, **Picture / video**, **Picture + me** (you in a corner), **Screen**, **Screen + me**, **Black**, and an on-screen **caption** bar. Upload pictures (JPG, PNG, WebP, GIF) and videos (MP4, WebM, MOV; up to 50 MB each) in the same window; press **Show** to put one on screen. The sound of a video goes out to the audience too, mixed with your microphone.
