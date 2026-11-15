@@ -31,3 +31,11 @@ create policy "audio: staff upload" on storage.objects for insert to authenticat
 drop policy if exists "audio: staff delete" on storage.objects;
 create policy "audio: staff delete" on storage.objects for delete to authenticated
   using (bucket_id = 'audio' and public.editor_role() in ('admin', 'editor'));
+
+-- royalty-free library (Openverse import): where a track came from, its license and the credit line to show
+alter table public.tracks add column if not exists source     text;
+alter table public.tracks add column if not exists license    text;
+alter table public.tracks add column if not exists credit     text;
+alter table public.tracks add column if not exists source_url text;
+alter table public.tracks add column if not exists duration   int;
+create index if not exists tracks_source_url on public.tracks (source_url);

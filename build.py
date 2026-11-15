@@ -701,13 +701,23 @@ class Site:
     def live_page(self):
         url, key = db_settings(self.cfg)
         conf = json.dumps({"url": url, "anon_key": key}).replace("</", "<\\/")
-        card = lambda kind, name, verb, el: (
-            f'<section class="livecard" data-kind="{kind}"><div class="lhead"><h2>{name}</h2>'
-            f'<span class="lstate off">Off air</span></div><p class="ltitle">Not broadcasting right now.</p>'
-            f'{el}<button class="lbtn" type="button" hidden>{verb}</button><p class="lmsg" role="status"></p></section>')
-        body = (f'<div class="wrap live"><h1>Live</h1><p class="lead">Live radio and TV from {esc(self.cfg["site_name"])}.</p>'
-                f'<div class="livegrid">{card("radio", "Live radio", "&#9654; Listen live", "<audio class=lmedia controls hidden></audio>")}'
-                f'{card("tv", "Live TV", "&#9654; Watch live", "<video class=lmedia controls playsinline hidden></video>")}</div>'
+        ctl = ('<div class="ctl"><button class="lbtn" type="button" hidden aria-label="{verb}"><span class="ic">&#9654;</span><span class="tx">{verb}</span></button>'
+               '<button class="lmute" type="button" aria-label="Mute" aria-pressed="false" hidden>&#128266;</button>'
+               '<input class="lvol" type="range" min="0" max="100" value="80" aria-label="Volume" hidden>{extra}</div>')
+        tv = ('<section class="livecard tvc" data-kind="tv" aria-label="Live TV"><div class="stage"><video class="lmedia" playsinline></video>'
+              '<div class="poster"><span class="ps">Off air</span><span class="pm">Live TV is not broadcasting right now.</span></div>'
+              '<span class="lstate off">Off air</span><span class="ltime" hidden></span></div>'
+              + ctl.format(verb="Watch live", extra='<button class="lfs" type="button" aria-label="Full screen" hidden>&#x26F6;</button>') +
+              '<h2 class="ltitle">Live TV</h2><p class="lsub"></p><p class="lmsg" role="status" aria-live="polite"></p></section>')
+        radio = ('<section class="livecard radc" data-kind="radio" aria-label="Live radio"><div class="rtop"><span class="lstate off">Off air</span><span class="ltime" hidden></span></div>'
+                 '<div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>'
+                 '<audio class="lmedia" hidden></audio><h2 class="ltitle">Live radio</h2><p class="lnow" hidden></p><p class="lsub">Live radio is not broadcasting right now.</p>'
+                 + ctl.format(verb="Listen live", extra="") + '<p class="lmsg" role="status" aria-live="polite"></p></section>')
+        more = "".join(self.card(a, "../", "m") for a in self.arts[:3])
+        more = (f'<section class="lvmore"><h2 id="lvmoreh">Meanwhile, the latest stories</h2><div class="grid3">{more}</div></section>' if more else "")
+        body = (f'<div class="wrap livepage"><div class="lvhead"><h1>Live</h1><p class="lead">Live TV and radio from {esc(self.cfg["site_name"])}. '
+                f'Anyone can listen and watch, no account needed.</p></div>'
+                f'<div class="livegrid" data-live="none">{tv}{radio}</div>{more}'
                 f'<script id="spark-live-config" type="application/json">{conf}</script>'
                 f'<script src="../assets/live.js?v={asset_ver("live.js")}" defer></script></div>')
         return self.page("Live", body, "../", active="live")

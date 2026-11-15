@@ -42,3 +42,20 @@ end $$;
 
 revoke execute on function public.live_set(text, text, boolean), public.live_beat(text) from public, anon;
 grant execute on function public.live_set(text, text, boolean), public.live_beat(text) to authenticated;
+
+-- "Now playing" line shown to listeners (song title and credit), set by the studio while on air
+alter table public.live_channels add column if not exists now_playing text;
+create or replace view public.live_now as
+  select kind, title, started_at, now_playing from public.live_channels
+  where on_air and heartbeat > now() - interval '90 seconds';
+grant select on public.live_now to anon, authenticated;
+
+create or replace function public.live_playing(p_kind text, p_text text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if public.editor_role() not in ('admin', 'editor') then raise exception 'Only editors and admins can go live'; end if;
+  update public.live_channels set now_playing = nullif(left(trim(coalesce(p_text, '')), 200), '')
+   where kind = p_kind and on_air and started_by = auth.uid();
+end $$;
+revoke execute on function public.live_playing(text, text) from public, anon;
+grant execute on function public.live_playing(text, text) to authenticated;

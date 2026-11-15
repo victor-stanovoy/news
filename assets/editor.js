@@ -390,15 +390,20 @@
     el.crossOrigin = 'anonymous'; el.preload = 'auto';
     el.addEventListener('ended', function () {
       var t = d.tracks[d.idx], n = d.autoNext && t && t.kind !== 'jingle' ? nextMusic(d, d.idx + 1) : -1;
-      if (n >= 0) playTrack(kind, n); else { d.idx = -1; d.ui(); }
+      if (n >= 0) playTrack(kind, n); else { d.idx = -1; d.ui(); announce(kind, null); }
     });
     el.addEventListener('play', function () { d.ui(); }); el.addEventListener('pause', function () { d.ui(); });
     d.el = el;
   }
+  /* tell listeners what is playing (only while on air; jingles are not announced) */
+  function announce(kind, t) {
+    if (!onAir[kind]) return;
+    sb.rpc('live_playing', { p_kind: kind, p_text: t && t.kind !== 'jingle' ? (t.credit || t.title) : '' }).then(function () {}, function () {});
+  }
   function playTrack(kind, i) {
     var d = deckFor(kind), t = d.tracks[i];
-    if (!t) { d.idx = -1; d.ui(); return; }
-    d.idx = i; d.ui();
+    if (!t) { d.idx = -1; d.ui(); announce(kind, null); return; }
+    d.idx = i; d.ui(); announce(kind, t);
     sb.storage.from('audio').createSignedUrl(t.path, 3600).then(function (r) {
       if (r.error) throw r.error;
       d.el.src = r.data.signedUrl; return d.el.play();
@@ -407,7 +412,7 @@
   function stopDeck(kind) {
     var d = deckState[kind]; if (!d) return;
     try { d.el.pause(); } catch (e) { /* ignore */ }
-    d.idx = -1; d.ui();
+    d.idx = -1; d.ui(); announce(kind, null);
   }
   function buildMixer(S, d) {
     var AC = window.AudioContext || window.webkitAudioContext;
@@ -520,7 +525,7 @@
       list.replaceChildren.apply(list, d.tracks.map(function (t, i) {
         return h('div', { class: 'track' },
           h('button', { class: 'btn', type: 'button', text: '▶', 'aria-label': 'Play ' + t.title, onclick: function () { playTrack(kind, i); } }),
-          h('span', { class: 'tt' }, h('b', { text: t.title }), h('small', { text: (t.kind === 'jingle' ? 'Jingle' : 'Music') + (t.size ? ' · ' + (t.size / 1048576).toFixed(1) + ' MB' : '') })),
+          h('span', { class: 'tt' }, h('b', { text: t.title }), h('small', { text: (t.kind === 'jingle' ? 'Jingle' : 'Music') + (t.license ? ' · ' + t.license : '') + (t.size ? ' · ' + (t.size / 1048576).toFixed(1) + ' MB' : '') })),
           h('button', { class: 'btn danger', type: 'button', text: 'Delete', onclick: function () {
             if (!confirm('Delete "' + t.title + '" from the library?')) return;
             if (d.idx === i) stopDeck(kind);
@@ -558,8 +563,47 @@
     } });
     fileIn.onchange = function () { if (fileIn.files.length) uploadBtn.click(); };
 
+    /* royalty-free finder (Openverse through the music-library function) */
+    var qIn = h('input', { type: 'search', placeholder: 'Search free music: calm piano, jazz, news intro…', maxlength: '100', 'aria-label': 'Search free music' });
+    var found = h('div', { class: 'found' }), foundMsg = h('p', { class: 'hint' }), pager = h('div', { class: 'btnrow' });
+    var pv = new Audio(), pvBtn = null; pv.addEventListener('ended', function () { if (pvBtn) pvBtn.textContent = '▶'; });
+    stops.push(function () { pv.pause(); });
+    var lastQ = '', lastPage = 1;
+    function search(page) {
+      lastQ = qIn.value.trim(); lastPage = page || 1; foundMsg.className = 'hint'; foundMsg.textContent = 'Searching…';
+      callFunction('music-library', { mode: 'search', q: lastQ, page: lastPage }).then(function (r) {
+        if (!r.ok) { foundMsg.className = 'msg err'; foundMsg.textContent = r.error || 'Search failed'; found.replaceChildren(); pager.replaceChildren(); return; }
+        foundMsg.className = 'hint';
+        foundMsg.textContent = r.items.length ? 'All results are free to use on a website. Songs marked "credit" show their credit line to listeners automatically.' : 'Nothing found. Try another word.';
+        found.replaceChildren.apply(found, r.items.map(function (it) {
+          var play = h('button', { class: 'btn', type: 'button', text: '▶', 'aria-label': 'Preview ' + it.title, onclick: function () {
+            if (pvBtn === play && !pv.paused) { pv.pause(); play.textContent = '▶'; return; }
+            if (pvBtn) pvBtn.textContent = '▶'; pvBtn = play; pv.src = it.preview; pv.volume = 0.7; play.textContent = '❚❚';
+            pv.play().catch(function () { play.textContent = '▶'; toast('Could not preview this track', true); });
+          } });
+          var add = h('button', { class: 'btn primary', type: 'button', text: 'Add', onclick: function () {
+            add.disabled = true; add.textContent = 'Adding…';
+            callFunction('music-library', { mode: 'import', id: it.id }).then(function (x) {
+              if (!x.ok) { add.disabled = false; add.textContent = 'Add'; return toast(x.error || 'Could not add it', true); }
+              add.textContent = x.already ? 'Already added' : 'Added ✓'; toast(x.already ? 'This track is already in your library' : '"' + it.title + '" added'); load();
+            });
+          } });
+          var min = Math.floor((it.duration || 0) / 60), sec = String((it.duration || 0) % 60).padStart(2, '0');
+          return h('div', { class: 'track' }, play,
+            h('span', { class: 'tt' }, h('b', { text: it.title }), h('small', { text: [it.creator, it.license, it.duration ? min + ':' + sec : '', it.genre, it.needs_credit ? 'credit' : ''].filter(Boolean).join(' · ') })), add);
+        }));
+        pager.replaceChildren();
+        if (lastPage > 1) pager.append(h('button', { class: 'btn', type: 'button', text: 'Previous', onclick: function () { search(lastPage - 1); } }));
+        if (r.pages > lastPage) pager.append(h('button', { class: 'btn', type: 'button', text: 'More results', onclick: function () { search(lastPage + 1); } }));
+      });
+    }
+    qIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); search(1); } });
+    var finder = h('details', { class: 'finder' }, h('summary', { text: 'Find free, royalty-free music' }),
+      h('div', { class: 'uprow' }, qIn, h('button', { class: 'btn primary', type: 'button', text: 'Search', onclick: function () { search(1); } })),
+      foundMsg, found, pager);
+
     applyVol(); load();
-    return h('section', { class: 'panel wide' }, h('h3', { text: 'Music & jingles' }),
+    return h('section', { class: 'panel wide' }, h('h3', { text: 'Music & jingles' }), finder,
       h('div', { class: 'uprow' }, fileIn, kindSel, uploadBtn, upMsg),
       h('div', { class: 'player' }, now, h('div', { class: 'btnrow' }, playBtn, nextBtn, stopBtn, muteBtn)),
       h('div', { class: 'mixrow' },

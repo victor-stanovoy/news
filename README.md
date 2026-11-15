@@ -93,6 +93,19 @@ One-time setup (about 15 minutes):
 
 Tips: use headphones while testing so the radio does not echo into your microphone. Keep the editor page open while broadcasting.
 
+### Free music library and the Live page
+
+The radio studio has a **Find free, royalty-free music** box. It searches Openverse (openverse.org), a free catalogue of openly licensed audio, and only shows tracks that may be used commercially (CC0, public domain, CC BY, CC BY-SA). Press **Add** and the song is copied into your private music library together with its license and credit line.
+
+One-time setup:
+
+1. Run `supabase/music.sql` and `supabase/live.sql` again in the SQL Editor (both were extended).
+2. Edge Functions → new function named `music-library` → paste `supabase/functions/music-library/index.ts` → turn **Verify JWT off**.
+
+No account or key is needed. Songs licensed "CC BY" or "CC BY-SA" require credit: while such a song plays, listeners see its credit line under the player on the Live page, which satisfies that. The library shows each song's license so you can check.
+
+The Live page for visitors has a TV player (play, volume, mute, full screen) and a radio player (equalizer, on-air time, the current song), updates every 10 seconds, reconnects after a weak connection, and shows the latest stories when nothing is live. Keyboard: `M` mutes, `F` goes full screen.
+
 ## Newsletter (compose, send, sign-up box)
 
 The **Newsletter** window in the editor lets admins and editors build an email from a template (Daily digest, Top story, Cards, Letter, Alert) or paste your own HTML, preview it on desktop and phone, send a test, and send it to everyone confirmed. The **Design** tab changes colors, font, width, header, buttons, logo, footer and social links for all templates.

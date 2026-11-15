@@ -207,3 +207,7 @@ body.focusing{overflow:hidden}
 .subrow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line)}.subrow:last-child{border-bottom:0}.subrow .e{flex:1;min-width:0}.subrow .e b,.subrow .e small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.subrow small{color:var(--muted);font-size:12px}
 .colors{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}.colorfield{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--card);font-size:13px}.colorfield input{width:34px;height:28px;padding:0;border:0;background:none}
 .socials{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}@media (max-width:600px){.socials{grid-template-columns:1fr}}
+
+.finder{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;background:var(--soft)}
+.finder summary{cursor:pointer;font-weight:700}.finder .uprow{margin:10px 0 6px}.finder .uprow input[type=search]{flex:1;min-width:0}
+.finder .found{display:grid;gap:6px;margin:8px 0}
