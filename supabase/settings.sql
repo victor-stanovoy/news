@@ -48,9 +48,9 @@ begin
     select k.key, coalesce(s.value, '') not in ('', 'PASTE_TOKEN_HERE'),
            case when coalesce(s.value, '') in ('', 'PASTE_TOKEN_HERE') then null
                 when k.key = 'livekit_url' then s.value
-                when k.key = 'livekit_api_key' then s.value
+                when k.key in ('livekit_api_key', 'smtp_host', 'smtp_port', 'smtp_user', 'mailjet_api_key') then s.value
                 else '...' || right(s.value, 4) end
-    from (values ('livekit_url'), ('livekit_api_key'), ('livekit_api_secret'), ('github_token'), ('brevo_api_key')) as k(key)
+    from (values ('livekit_url'), ('livekit_api_key'), ('livekit_api_secret'), ('github_token'), ('resend_api_key'), ('mailjet_api_key'), ('mailjet_secret_key'), ('smtp_host'), ('smtp_port'), ('smtp_user'), ('smtp_pass')) as k(key)
     left join public.app_secrets s on s.key = k.key;
 end $$;
 
@@ -58,7 +58,7 @@ create or replace function public.secret_set(p_key text, p_value text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   if public.editor_role() is distinct from 'admin' then raise exception 'Only admins can change keys'; end if;
-  if p_key not in ('livekit_url', 'livekit_api_key', 'livekit_api_secret', 'github_token', 'brevo_api_key') then raise exception 'Unknown setting'; end if;
+  if p_key not in ('livekit_url', 'livekit_api_key', 'livekit_api_secret', 'github_token', 'resend_api_key', 'mailjet_api_key', 'mailjet_secret_key', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass') then raise exception 'Unknown setting'; end if;
   if nullif(trim(p_value), '') is null then delete from public.app_secrets where key = p_key;
   else insert into public.app_secrets (key, value) values (p_key, trim(p_value))
        on conflict (key) do update set value = excluded.value; end if;
@@ -66,3 +66,6 @@ end $$;
 
 revoke execute on function public.settings_save(jsonb), public.secret_status(), public.secret_set(text, text) from public, anon;
 grant execute on function public.settings_save(jsonb), public.secret_status(), public.secret_set(text, text) to authenticated;
+
+-- the newsletter no longer uses Brevo: remove a key saved by an earlier version
+delete from public.app_secrets where key = 'brevo_api_key';

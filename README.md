@@ -110,20 +110,28 @@ The Live page for visitors has a TV player (play, volume, mute, full screen) and
 
 The **Newsletter** window in the editor lets admins and editors build an email from a template (Daily digest, Top story, Cards, Letter, Alert) or paste your own HTML, preview it on desktop and phone, send a test, and send it to everyone confirmed. The **Design** tab changes colors, font, width, header, buttons, logo, footer and social links for all templates.
 
+You choose the service that delivers the emails in **Settings → Newsletter → Email service**:
+
+| Service | Free plan | What you need |
+|---|---|---|
+| Resend | about 100 emails a day | API key (resend.com → API Keys, "Sending access"); your own domain verified at resend.com/domains; sender address on that domain |
+| Mailjet | about 200 emails a day | API key + secret key; sender address verified in Mailjet |
+| Your own mail server (SMTP) | your mailbox's limit (Gmail about 500 a day) | server name, port (587 or 465), user name, password (Gmail needs an "app password") |
+
 One-time setup:
 
-1. Supabase → SQL Editor → run `supabase/newsletter.sql` (and `supabase/settings.sql` again, it now knows the Brevo key).
+1. Supabase → SQL Editor → run `supabase/newsletter.sql`, and run `supabase/settings.sql` again (it knows the email keys now).
 2. Deploy the function: Edge Functions → new function named `newsletter` → paste `supabase/functions/newsletter/index.ts` → turn **Verify JWT off** (the function checks who is calling by itself).
-3. Make a free account at brevo.com, verify your sender address (Senders & IP), then create an API key (SMTP & API → API keys).
-4. Editor → Settings → Newsletter: paste the Brevo key, press **Test Brevo connection**, tick **Show the sign-up box on the website**, press Save (this also saves your site address, which the confirm and unsubscribe links need).
-5. Editor → Newsletter → Design: set the sender name, sender email (the one verified in Brevo) and your postal address, then Save.
+3. Editor → Settings → Newsletter: choose the email service, fill in its details, press **Save and test connection**, tick **Show the sign-up box on the website**, press Save (this also saves your site address, which the confirm and unsubscribe links need).
+4. Editor → Newsletter → Design: set the sender name, sender email and your postal address, then Save.
 
 Good to know:
 
 - Sign-up uses double opt-in: people get a confirmation email first. Every email gets an unsubscribe link automatically, even pasted HTML.
-- Brevo's free plan sends about 300 emails a day. A bigger list sends in several rounds; the Send dialog resumes where it stopped.
+- Free plans have a daily limit. A bigger list sends in several rounds; the Send dialog resumes where it stopped and nobody gets it twice.
 - Placeholders in your text: `{{name}}`, `{{email}}`, `{{unsubscribe_url}}`.
 - Only add people who agreed to receive email (the Add box asks you to confirm this). Keep a real postal address in the footer; many countries require it.
+- The keys are stored where the website and the editor pages cannot read them; only the function can.
 
 ## Adding articles with CSV files
 

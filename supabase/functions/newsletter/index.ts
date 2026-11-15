@@ -1,8 +1,8 @@
 // SparkNews newsletter function. Deploy as a Supabase Edge Function named "newsletter" with "Verify JWT" switched OFF
-// (it checks who is asking itself). The Brevo API key is read from the database (Settings tab in the editor).
+// (it checks who is asking itself). The email service keys are read from the database (Settings tab in the editor).
 //
 // Public:  subscribe (sends a confirmation email), confirm, unsubscribe
-// Staff:   test (send one test email), send (send to all confirmed subscribers, in chunks), check (admin: test the Brevo key)
+// Staff:   test (send one test email), send (send to all confirmed subscribers, in chunks), check (admin: test the email service)
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -15,7 +15,7 @@ const reply = (body: unknown, status = 200) =>
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const EMAIL = /^[^\s@<>()"',;:]+@[^\s@<>()"',;:]+\.[^\s@<>()"',;:]{2,}$/;
 const CHUNK = 120;       // recipients handled per call; the editor keeps calling until nobody is left
-const BATCH = 40;        // recipients per Brevo request
+const BATCH = 40;        // recipients per request to the email service
 
 /** Defense in depth: mail programs already ignore scripts, but nothing active should ever leave here. */
 export function cleanEmailHtml(html: string): string {
@@ -64,6 +64,98 @@ function simpleMail(site: string, d: Record<string, string>, title: string, body
     `<tr><td style="padding:28px;font-size:16px;line-height:1.6"><h1 style="margin:0 0 12px;font-size:22px">${esc(title)}</h1>${body}${btn}</td></tr></table></td></tr></table></body></html>`;
 }
 
+// ---------------------------------------------------------------- email services (chosen in Settings)
+export type Msg = { to: string; name?: string; html: string; text: string };
+export type Opts = { subject: string; from: { name: string; email: string }; replyTo?: string };
+export type Result = { ok: boolean; error?: string };
+export const PROVIDERS: Record<string, string> = { resend: "Resend", mailjet: "Mailjet", smtp: "your mail server (SMTP)" };
+const SECRET_KEYS = ["resend_api_key", "mailjet_api_key", "mailjet_secret_key", "smtp_host", "smtp_port", "smtp_user", "smtp_pass"];
+
+// deno-lint-ignore no-explicit-any
+async function call(url: string, init: RequestInit): Promise<{ ok: boolean; status: number; data: any }> {
+  try {
+    const r = await fetch(url, init);
+    const t = await r.text(); let data = null; try { data = t ? JSON.parse(t) : null; } catch { /* not json */ }
+    return { ok: r.ok, status: r.status, data };
+  } catch { return { ok: false, status: 0, data: null }; }
+}
+const detail = (d: any) => (d && (d.message || d.ErrorMessage || (d.Messages && d.Messages[0] && d.Messages[0].Errors && d.Messages[0].Errors[0] && d.Messages[0].Errors[0].ErrorMessage))) || "";
+const addr = (m: { to: string; name?: string }) => (m.name ? `${m.name.replace(/["<>\r\n]/g, "")} <${m.to}>` : m.to);
+
+/** Returns the mailer for the chosen service, or null when its details are not all filled in. */
+export function makeMailer(provider: string, sec: Record<string, string>) {
+  if (provider === "resend") {
+    const key = sec.resend_api_key; if (!key) return null;
+    const h = { Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
+    const err = (r: { status: number; data: any }) =>
+      r.status === 0 ? "Could not reach Resend." : r.status === 401 || r.status === 403 && /api key/i.test(detail(r.data)) ? "Resend rejected the API key. Check it in Settings." :
+      r.status === 403 ? `Resend refused the request: ${detail(r.data) || "is your domain verified in Resend?"}` : `Resend error ${r.status}${detail(r.data) ? ": " + detail(r.data) : ""}`;
+    return {
+      label: "Resend", daily: 100,
+      async check() {
+        const r = await call("https://api.resend.com/domains", { headers: h });
+        if (r.ok) return { ok: true, info: `${(r.data && r.data.data || []).length} domain(s)` };
+        if (r.status === 401 && r.data && r.data.name === "restricted_api_key") return { ok: true, info: "sending-only key accepted" };   // a key that may only send is fine
+        return { ok: false, error: err(r) };
+      },
+      async send(msgs: Msg[], o: Opts): Promise<Result> {
+        const mk = (m: Msg) => ({ from: `${o.from.name.replace(/["<>\r\n]/g, "")} <${o.from.email}>`, to: [m.to], subject: o.subject, html: m.html, text: m.text, ...(o.replyTo ? { reply_to: o.replyTo } : {}) });
+        const r = msgs.length === 1 ? await call("https://api.resend.com/emails", { method: "POST", headers: h, body: JSON.stringify(mk(msgs[0])) })
+          : await call("https://api.resend.com/emails/batch", { method: "POST", headers: h, body: JSON.stringify(msgs.map(mk)) });
+        return r.ok ? { ok: true } : { ok: false, error: err(r) };
+      },
+    };
+  }
+  if (provider === "mailjet") {
+    const k = sec.mailjet_api_key, sk = sec.mailjet_secret_key; if (!k || !sk) return null;
+    const h = { Authorization: "Basic " + btoa(`${k}:${sk}`), "Content-Type": "application/json" };
+    const err = (r: { status: number; data: any }) =>
+      r.status === 0 ? "Could not reach Mailjet." : r.status === 401 ? "Mailjet rejected the API key or secret. Check them in Settings." :
+      r.status === 403 ? `Mailjet refused the request: ${detail(r.data) || "is the sender address verified in Mailjet?"}` : `Mailjet error ${r.status}${detail(r.data) ? ": " + detail(r.data) : ""}`;
+    return {
+      label: "Mailjet", daily: 200,
+      async check() {
+        const r = await call("https://api.mailjet.com/v3/REST/apikey", { headers: h });
+        return r.ok ? { ok: true, info: r.data && r.data.Data && r.data.Data[0] && r.data.Data[0].Name || "" } : { ok: false, error: err(r) };
+      },
+      async send(msgs: Msg[], o: Opts): Promise<Result> {
+        const Messages = msgs.map((m) => ({ From: { Email: o.from.email, Name: o.from.name }, To: [{ Email: m.to, ...(m.name ? { Name: m.name } : {}) }], Subject: o.subject, HTMLPart: m.html, TextPart: m.text, ...(o.replyTo ? { ReplyTo: { Email: o.replyTo } } : {}) }));
+        const r = await call("https://api.mailjet.com/v3.1/send", { method: "POST", headers: h, body: JSON.stringify({ Messages }) });
+        const bad = r.data && Array.isArray(r.data.Messages) && r.data.Messages.find((x: any) => x.Status === "error");
+        return r.ok && !bad ? { ok: true } : { ok: false, error: bad ? `Mailjet error: ${detail({ Messages: [bad] }) || "a message was refused"}` : err(r) };
+      },
+    };
+  }
+  if (provider === "smtp") {
+    const host = sec.smtp_host, user = sec.smtp_user, pass = sec.smtp_pass; if (!host || !user || !pass) return null;
+    const port = Number(sec.smtp_port) || 587;
+    const transport = async () => {
+      // deno-lint-ignore no-explicit-any
+      const hook = (globalThis as any).__SPARK_SMTP;
+      const nm = hook ? hook : (await import("npm:nodemailer@6.9.16")).default;
+      return nm.createTransport({ host, port, secure: port === 465, auth: { user, pass }, pool: true, maxConnections: 3, connectionTimeout: 15000, socketTimeout: 30000 });
+    };
+    const err = (e: any) => {
+      const c = String(e && (e.code || e.responseCode) || "");
+      return /EAUTH|535|534/.test(c) ? "The mail server rejected the user name or password. (Gmail needs an app password.)" :
+        /ECONN|ETIMEDOUT|ENOTFOUND|ESOCKET/.test(c) ? "Could not connect to the mail server. Check the server name and port." :
+        `Mail server error${e && e.message ? ": " + String(e.message).slice(0, 160) : ""}`;
+    };
+    return {
+      label: "your mail server", daily: 400,
+      async check() { try { const t = await transport(); await t.verify(); return { ok: true, info: host }; } catch (e) { return { ok: false, error: err(e) }; } },
+      async send(msgs: Msg[], o: Opts): Promise<Result> {
+        try {
+          const t = await transport();
+          await Promise.all(msgs.map((m) => t.sendMail({ from: `"${o.from.name.replace(/["<>\r\n]/g, "")}" <${o.from.email}>`, to: addr(m), subject: o.subject, html: m.html, text: m.text, ...(o.replyTo ? { replyTo: o.replyTo } : {}) })));
+          return { ok: true };
+        } catch (e) { return { ok: false, error: err(e) }; }
+      },
+    };
+  }
+  return null;
+}
+
 export async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return reply({ error: "POST only" }, 405);
@@ -89,28 +181,18 @@ export async function handle(req: Request): Promise<Response> {
 
   // ---- settings and keys (saved by an admin in the editor)
   const sec: Record<string, string> = {};
-  const sr = await db("app_secrets?select=key,value&key=eq.brevo_api_key");
+  const sr = await db(`app_secrets?select=key,value&key=in.(${SECRET_KEYS.join(",")})`);
   if (sr.ok && Array.isArray(sr.data)) for (const x of sr.data) sec[x.key] = x.value;
-  const brevoKey = sec.brevo_api_key || env("BREVO_API_KEY");
+  if (!sec.resend_api_key && env("RESEND_API_KEY")) sec.resend_api_key = env("RESEND_API_KEY");
   const st = await db("site_settings?select=data&id=eq.1");
   const settings = (st.ok && Array.isArray(st.data) && st.data[0] && st.data[0].data) || {};
   const nl = settings.newsletter || {};
   const siteName = String(settings.site_name || env("SITE_NAME") || "SparkNews");
   const base = String(settings.base_url || env("SITE_URL") || (/^https:\/\//.test(req.headers.get("origin") ?? "") ? req.headers.get("origin") : "")).replace(/\/+$/, "");
 
-  const brevo = async (path: string, body?: unknown) => {
-    const r = await fetch(`https://api.brevo.com/v3/${path}`, {
-      method: body === undefined ? "GET" : "POST",
-      headers: { "api-key": brevoKey, accept: "application/json", "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await r.text(); let data: any = null; try { data = text ? JSON.parse(text) : null; } catch { /* not json */ }
-    return { ok: r.ok, status: r.status, data };
-  };
-  const brevoError = (r: { status: number; data: any }) =>
-    r.status === 401 ? "Brevo rejected the API key. Check it in Settings." :
-    r.status === 403 ? "Brevo refused the request. Is the sender address verified in Brevo (Senders & IP)?" :
-    `Brevo error ${r.status}${r.data && r.data.message ? ": " + r.data.message : ""}`;
+  const provider = PROVIDERS[String(nl.provider)] ? String(nl.provider) : "resend";
+  const mailer = makeMailer(provider, sec);
+  const notSetUp = `The email service is not set up: open the editor's Settings tab, choose ${PROVIDERS[provider]} and fill in its details.`;
   const sender = () => {
     const email = String(nl.from_email || "").trim(), name = String(nl.from_name || siteName).trim();
     return EMAIL.test(email) ? { name, email } : null;
@@ -122,7 +204,7 @@ export async function handle(req: Request): Promise<Response> {
     const email = String(input.email || "").trim().toLowerCase();
     if (!EMAIL.test(email) || email.length > 254) return reply({ error: "Please enter a valid email address." }, 400);
     const name = String(input.name || "").trim().slice(0, 80) || null;
-    if (!brevoKey || !sender() || !base) return reply({ error: "The newsletter is not set up yet." }, 503);
+    if (!mailer || !sender() || !base) return reply({ error: "The newsletter is not set up yet." }, 503);
     const ex = await db(`subscribers?select=id,status,token,last_confirm_sent&email=eq.${encodeURIComponent(email)}`);
     let sub = Array.isArray(ex.data) ? ex.data[0] : null;
     if (sub && sub.status === "confirmed") return reply({ ok: true });         // same answer for everyone: no way to probe who is subscribed
@@ -135,12 +217,11 @@ export async function handle(req: Request): Promise<Response> {
       await db(`subscribers?id=eq.${sub.id}`, { method: "PATCH", body: { status: "pending", ...(name ? { name } : {}) } });
     }
     const link = `${base}/newsletter/?confirm=${sub.token}`;
-    const m = await brevo("smtp/email", {
-      sender: sender(), to: [{ email, ...(name ? { name } : {}) }], subject: `Please confirm your subscription to ${siteName}`,
-      htmlContent: simpleMail(siteName, { brand: nl.brand, header_bg: nl.header_bg }, "Confirm your subscription",
+    const m = await mailer.send([{ to: email, name: name || undefined,
+      html: simpleMail(siteName, { brand: nl.brand, header_bg: nl.header_bg }, "Confirm your subscription",
         `<p style="margin:0">Thanks for signing up to the ${esc(siteName)} newsletter. Please confirm your email address so we can send it to you.</p>`, "Confirm my subscription", link),
-      textContent: `Confirm your subscription to ${siteName}: ${link}\n\nIf you did not sign up, ignore this email.`,
-    });
+      text: `Confirm your subscription to ${siteName}: ${link}\n\nIf you did not sign up, ignore this email.` }],
+      { subject: `Please confirm your subscription to ${siteName}`, from: sender()! });
     if (!m.ok) return reply({ error: "We could not send the confirmation email. Please try again later." }, 502);
     await db(`subscribers?id=eq.${sub.id}`, { method: "PATCH", body: { last_confirm_sent: new Date().toISOString() } });
     return reply({ ok: true });
@@ -162,33 +243,32 @@ export async function handle(req: Request): Promise<Response> {
   const rr = await fetch(`${dbUrl}/rest/v1/rpc/editor_role`, { method: "POST", headers: { apikey, Authorization: auth, "Content-Type": "application/json" }, body: "{}" });
   const role = rr.ok ? await rr.json() : null;
   if (role !== "admin" && role !== "editor") return reply({ error: "Only editors and admins can use the newsletter." }, 403);
-  if (!brevoKey) return reply({ error: "Brevo is not set up: paste the Brevo API key in the editor's Settings tab." }, 503);
+  if (!mailer) return reply({ error: notSetUp }, 503);
 
   if (mode === "check") {
     if (role !== "admin") return reply({ error: "Only admins can test the connection." }, 403);
-    const r = await brevo("account");
-    if (!r.ok) return reply({ ok: false, error: brevoError(r) });
-    const credits = Array.isArray(r.data && r.data.plan) ? r.data.plan.find((p: any) => p.type === "free" || p.credits !== undefined) : null;
-    return reply({ ok: true, account: r.data && r.data.email, credits: credits ? credits.credits : null, sender_ok: !!sender() });
+    const r = await mailer.check();
+    if (!r.ok) return reply({ ok: false, error: r.error });
+    return reply({ ok: true, service: mailer.label, info: r.info || "", daily: mailer.daily, sender_ok: !!sender() });
   }
 
   const from = sender();
-  if (!from) return reply({ error: "Set the sender name and email in Newsletter > Design first. The email must be verified in Brevo." }, 400);
+  if (!from) return reply({ error: "Set the sender name and email in Newsletter > Design first. The email must be verified with your email service." }, 400);
   const subject = String(input.subject || "").trim().slice(0, 200);
   let html = String(input.html || "");
   if (!subject) return reply({ error: "The email needs a subject line." }, 400);
   if (html.length < 20) return reply({ error: "The email is empty." }, 400);
   if (html.length > 400_000) return reply({ error: "The email is too large (over 400 KB). Remove some content or images." }, 400);
   html = withUnsubscribe(cleanEmailHtml(html), siteName, String(nl.address || ""));
-  const replyTo = EMAIL.test(String(nl.reply_to || "")) ? { email: String(nl.reply_to) } : undefined;
+  const replyTo = EMAIL.test(String(nl.reply_to || "")) ? String(nl.reply_to) : undefined;
 
   if (mode === "test") {
     const to = String(input.to || "").trim().toLowerCase();
     if (!EMAIL.test(to)) return reply({ error: "Enter a valid address for the test email." }, 400);
     const v = { name: "Test reader", email: to, unsubscribe_url: `${base || "https://example.com"}/newsletter/?unsubscribe=test` };
     const body = fill(html, v);
-    const r = await brevo("smtp/email", { sender: from, ...(replyTo ? { replyTo } : {}), to: [{ email: to }], subject: `[TEST] ${subject}`, htmlContent: body, textContent: toText(body) });
-    return r.ok ? reply({ ok: true }) : reply({ error: brevoError(r) }, 502);
+    const r = await mailer.send([{ to, html: body, text: toText(body) }], { subject: `[TEST] ${subject}`, from, replyTo });
+    return r.ok ? reply({ ok: true }) : reply({ error: r.error }, 502);
   }
 
   // ---- send to subscribers, one chunk per call
@@ -219,12 +299,12 @@ export async function handle(req: Request): Promise<Response> {
     const part = todo.slice(0, CHUNK);
     for (let i = 0; i < part.length; i += BATCH) {
       const group = part.slice(i, i + BATCH);
-      const versions = group.map((s) => {
+      const msgs = group.map((s) => {
         const body = fill(html, { name: s.name || "", email: s.email, unsubscribe_url: `${base}/newsletter/?unsubscribe=${s.token}` });
-        return { to: [{ email: s.email, ...(s.name ? { name: s.name } : {}) }], htmlContent: body, textContent: toText(body) };
+        return { to: s.email, name: s.name || undefined, html: body, text: toText(body) };
       });
-      const r = await brevo("smtp/email", { sender: from, ...(replyTo ? { replyTo } : {}), subject, htmlContent: versions[0].htmlContent, messageVersions: versions });
-      if (!r.ok) { error = brevoError(r); break; }
+      const r = await mailer.send(msgs, { subject, from, replyTo });
+      if (!r.ok) { error = r.error || "Sending failed."; break; }
       await db("newsletter_sends", { method: "POST", prefer: "resolution=ignore-duplicates,return=minimal", body: group.map((s) => ({ newsletter_id: nid, subscriber_id: s.id })) });
       sentNow += group.length;
     }

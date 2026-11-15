@@ -780,7 +780,7 @@
 
       /* keys: write-only; the saved secret is never sent back to the browser */
       function keyBox(name, label, type, hintText, isUrl) {
-        var s = st[name] || {}, i = h('input', { type: type, autocomplete: 'off', spellcheck: 'false', value: isUrl || name === 'livekit_api_key' ? (s.hint || '') : '',
+        var s = st[name] || {}, i = h('input', { type: type, autocomplete: 'off', spellcheck: 'false', value: isUrl || ['livekit_api_key', 'mailjet_api_key', 'smtp_host', 'smtp_port', 'smtp_user'].indexOf(name) >= 0 ? (s.hint || '') : '',
           placeholder: s.is_set ? 'Saved (' + (s.hint || '') + '). Type a new one to replace it.' : 'Not set' });
         i.dataset.orig = i.value;
         return { name: name, input: i, field: field(label, i, hintText), saved: !!s.is_set };
@@ -788,15 +788,39 @@
       var lk = [keyBox('livekit_url', 'LiveKit address', 'text', 'Looks like wss://yourproject.livekit.cloud (LiveKit Cloud > Settings).', true),
                 keyBox('livekit_api_key', 'API key', 'text', 'From LiveKit Cloud > Settings > Keys.'),
                 keyBox('livekit_api_secret', 'API secret', 'password', 'Only shown once by LiveKit. It is stored where the website and the editor cannot read it.')];
-      var bv = keyBox('brevo_api_key', 'Brevo API key', 'password', 'From Brevo > your name > SMTP & API > API keys. It is stored where the website and the editor pages cannot read it.');
-      var bvMsg = h('p', { class: 'hint' });
-      var bvTest = h('button', { class: 'btn', type: 'button', text: 'Test Brevo connection', onclick: function () {
-        bvTest.disabled = true; bvMsg.className = 'hint'; bvMsg.textContent = 'Testing…';
-        saveKeys([bv], bvMsg, 'Brevo key').then(function () { return callFunction('newsletter', { mode: 'check' }); }).then(function (j) {
-          bvTest.disabled = false;
-          if (j.ok) { bvMsg.className = 'hint ok'; bvMsg.textContent = 'Connected to Brevo (' + (j.account || 'account') + ')' + (j.credits != null ? ', ' + j.credits + ' emails left' : '') + (j.sender_ok ? '.' : '. Now set the sender in Newsletter > Design.'); }
-          else { bvMsg.className = 'hint err'; bvMsg.textContent = j.error || 'The connection test failed.'; }
-        });
+      /* email service for the newsletter: pick one; only its fields are shown */
+      var PROV = { resend: 'Resend', mailjet: 'Mailjet', smtp: 'My own mail server (SMTP)' };
+      if (!PROV[V.newsletter.provider]) V.newsletter.provider = 'resend';
+      var mailKeys = {
+        resend: [keyBox('resend_api_key', 'Resend API key', 'password', 'From resend.com > API Keys (create it with "Sending access"). It is stored where the website and the editor pages cannot read it.')],
+        mailjet: [keyBox('mailjet_api_key', 'Mailjet API key', 'text', 'From Mailjet > Account settings > API Key Management.'),
+                  keyBox('mailjet_secret_key', 'Mailjet secret key', 'password', 'Shown next to the API key. Stored where the website cannot read it.')],
+        smtp: [keyBox('smtp_host', 'Mail server', 'text', 'For example smtp.gmail.com or mail.yourhost.com.'),
+               keyBox('smtp_port', 'Port', 'text', '587 is usual, 465 for secure connections. Empty means 587.'),
+               keyBox('smtp_user', 'User name', 'text', 'Usually your full email address.'),
+               keyBox('smtp_pass', 'Password', 'password', 'Gmail and others need an "app password", not your normal password.')]
+      };
+      var mailHelp = {
+        resend: 'Resend: the free plan sends about 100 emails a day. Verify your own domain at resend.com/domains and use an address on it as the sender (Newsletter > Design).',
+        mailjet: 'Mailjet: the free plan sends about 200 emails a day. Verify your sender address in Mailjet first (Account > Sender domains & addresses).',
+        smtp: 'Your own mail server: Gmail allows about 500 emails a day, many hosts less. The sender address must belong to this mailbox. Not every host allows sending from outside, so use the test button.'
+      };
+      var mailMsg = h('p', { class: 'hint' }), mailNote = h('p', { class: 'hint' });
+      var mailBoxes = {};
+      Object.keys(mailKeys).forEach(function (k) { mailBoxes[k] = h('div', {}, mailKeys[k].map(function (x) { return x.field; })); });
+      function showProv() { Object.keys(mailBoxes).forEach(function (k) { mailBoxes[k].hidden = k !== V.newsletter.provider; }); mailNote.textContent = mailHelp[V.newsletter.provider]; mailMsg.textContent = ''; }
+      var provSel = h('select', { 'aria-label': 'Email service', onchange: function () { V.newsletter.provider = provSel.value; mark(); showProv(); } },
+        Object.keys(PROV).map(function (k) { return h('option', { value: k, text: PROV[k] }); }));
+      provSel.value = V.newsletter.provider; showProv();
+      var mailTest = h('button', { class: 'btn', type: 'button', text: 'Save and test connection', onclick: function () {
+        mailTest.disabled = true; mailMsg.className = 'hint'; mailMsg.textContent = 'Testing…';
+        var cur = mailKeys[V.newsletter.provider];
+        sb.rpc('settings_save', { p_data: V }).then(function (r) { if (r.error) throw r.error; dirty = false; dirtyEl.textContent = ''; return saveKeys(cur, mailMsg, 'Email details'); })
+          .then(function () { return callFunction('newsletter', { mode: 'check' }); }).then(function (j) {
+            mailTest.disabled = false;
+            if (j.ok) { mailMsg.className = 'hint ok'; mailMsg.textContent = 'Connected to ' + j.service + (j.info ? ' (' + j.info + ')' : '') + (j.sender_ok ? '.' : '. Now set the sender in Newsletter > Design.'); }
+            else { mailMsg.className = 'hint err'; mailMsg.textContent = j.error || 'The connection test failed.'; }
+          }).catch(function (e) { mailTest.disabled = false; mailMsg.className = 'hint err'; mailMsg.textContent = errText(e); });
       } });
       var gh = keyBox('github_token', 'GitHub token', 'password', 'A fine-grained token for the repository "news" with Actions: Read and write. See the README.');
       var lkMsg = h('p', { class: 'hint' }), ghMsg = h('p', { class: 'hint' });
@@ -844,9 +868,10 @@
             lk.map(function (k) { return k.field; }), lkMsg,
             h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save LiveKit details', onclick: function () { saveKeys(lk, lkMsg, 'LiveKit details'); } }), testBtn)),
           h('section', { class: 'panel' }, h('h3', { text: 'Newsletter' }),
-            tick(V.newsletter, 'enabled', 'Show the sign-up box on the website (turn on after Brevo is connected)'),
+            tick(V.newsletter, 'enabled', 'Show the sign-up box on the website (turn on after the email service is connected)'),
             field('Box title', bind(V.newsletter, 'title', 'text', { maxlength: 80, placeholder: 'Get the newsletter' })), field('Box text', bind(V.newsletter, 'blurb', 'text', { maxlength: 240 })),
-            bv.field, bvMsg, h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save Brevo key', onclick: function () { saveKeys([bv], bvMsg, 'Brevo key'); } }), bvTest),
+            field('Email service', provSel, 'The service that actually delivers your newsletters. Pick one and fill in its details.'),
+            mailBoxes.resend, mailBoxes.mailjet, mailBoxes.smtp, mailNote, mailMsg, h('div', { class: 'btnrow' }, mailTest),
             h('p', { class: 'hint', text: 'Write and send newsletters in the Newsletter tab. Sender name, email and the look of the emails are set there under Design.' })),
           h('section', { class: 'panel' }, h('h3', { text: 'Instant website updates' }),
             h('p', { class: 'hint', text: gh.saved ? 'A token is saved. Publishing starts a website update by itself.' : 'No token saved yet, so the website only updates when you press "Update website" or at the next hourly rebuild.' }),

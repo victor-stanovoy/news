@@ -205,7 +205,7 @@
         var dlg = h('dialog', { class: 'small' }, h('header', {}, h('b', { text: 'Send newsletter' })),
           h('div', { class: 'pickerbody' }, h('p', {}, 'Subject: ', h('b', { text: st.subject })),
             h('p', { text: 'It goes to ' + n + ' confirmed subscriber' + (n === 1 ? '' : 's') + '. This cannot be undone.' }),
-            n > 300 ? h('p', { class: 'hint err', text: 'Brevo’s free plan only sends 300 emails per day. If it stops, press the send button again tomorrow: nobody gets it twice.' }) : null,
+            n > 90 ? h('p', { class: 'hint err', text: 'Free email plans usually send only 100 to 500 emails per day. If sending stops with an error, press the send button again later: nobody gets it twice.' }) : null,
             status, h('div', { class: 'btnrow' }, go, cancel)));
         go.onclick = function () {
           go.disabled = cancel.disabled = true; status.className = 'hint'; status.textContent = 'Saving…';
@@ -324,7 +324,7 @@
           h('h3', { text: 'Header' }), txt('logo_url', 'Logo picture address', 'A web address of a PNG or JPG, about 40 px tall. Leave empty to show only the name.', 'url'),
           (function () { var c = check('Show the site name next to the logo', D.show_name !== false, function () { D.show_name = c.input.checked; redraw(); }); c.input.disabled = dis; return c.box; })(), txt('tagline', 'Line under the name'),
           h('h3', { text: 'Footer' }), area('footer_text', 'Footer text', 'For example a short sentence about you.'), area('address', 'Postal address', 'Many countries require a postal address in newsletters.'), txt('unsub_text', 'Unsubscribe link wording'), h('div', { class: 'socials' }, soc),
-          h('h3', { text: 'Sender' }), txt('from_name', 'Sender name'), txt('from_email', 'Sender email', 'Must be a sender you verified in Brevo (Brevo > Senders, domains & IPs).', 'email'), txt('reply_to', 'Replies go to (optional)', '', 'email'),
+          h('h3', { text: 'Sender' }), txt('from_name', 'Sender name'), txt('from_email', 'Sender email', 'Must be an address your email service lets you send from (a verified domain or sender, or your own mailbox).', 'email'), txt('reply_to', 'Replies go to (optional)', '', 'email'),
           msg, h('div', { class: 'btnrow' }, saveBtn)),
         h('div', { class: 'nlprev' }, h('div', { class: 'prevhead' }, h('b', { text: 'Live preview' })), frame)));
       setDoc(frame, SE.preview(sample, D, opts()));
