@@ -106,6 +106,18 @@ No account or key is needed. Songs licensed "CC BY" or "CC BY-SA" require credit
 
 The Live page for visitors has a TV player (play, volume, mute, full screen) and a radio player (equalizer, on-air time, the current song), updates every 10 seconds, reconnects after a weak connection, and shows the latest stories when nothing is live. Keyboard: `M` mutes, `F` goes full screen.
 
+### TV studio: pictures, videos, screen and captions
+
+Set **Source** to *Studio* in the TV studio window. You get a program picture (exactly what the audience sees), six scenes (keys 1 to 6): **Camera**, **Picture / video**, **Picture + me** (you in a corner), **Screen**, **Screen + me**, **Black**, and an on-screen **caption** bar. Upload pictures (JPG, PNG, WebP, GIF) and videos (MP4, WebM, MOV; up to 50 MB each) in the same window; press **Show** to put one on screen. The sound of a video goes out to the audience too, mixed with your microphone.
+
+One-time setup: run `supabase/tvmedia.sql` in the Supabase SQL Editor (creates the private picture and video storage).
+
+Tips: keep the studio tab open while you broadcast; switching to another window inside the editor is fine. Browsers can play most MP4 files but not every one: if a video stays black, use an MP4 made with H.264.
+
+### Importing articles from a CSV file
+
+Admins: **Articles → Import CSV**, choose the file (for example your export), check the summary and press Import. New articles are added; articles that already exist (same id, or same headline when the file has no ids) are updated. Nothing is deleted, and you can run it again safely. Then press **Update website**.
+
 ## Newsletter (compose, send, sign-up box)
 
 The **Newsletter** window in the editor lets admins and editors build an email from a template (Daily digest, Top story, Cards, Letter, Alert) or paste your own HTML, preview it on desktop and phone, send a test, and send it to everyone confirmed. The **Design** tab changes colors, font, width, header, buttons, logo, footer and social links for all templates.

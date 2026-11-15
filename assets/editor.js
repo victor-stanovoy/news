@@ -236,6 +236,95 @@
     });
   }
 
+
+  /* ---------- import articles from a CSV export (admins) ---------- */
+  var CSV_BOOL = ['author_verified', 'taken_down', 'is_breaking', 'is_ai_translated', 'is_featured', 'is_live_update'];
+  var CSV_INT = ['cover_focus_x', 'cover_focus_y', 'views', 'series_order'];
+  var CSV_TEXT = ['id', 'title', 'subtitle', 'content', 'content_type', 'category', 'image_url', 'image_layout', 'reporter_video_url', 'author_name', 'status', 'breaking_description', 'live_update_label', 'citations', 'series_id'];
+  var CSV_JSON = { additional_images: [], live_updates: [], translations: {} };
+  function parseCsv(text) {
+    var rows = [], row = [], f = '', q = false, i = 0, c;
+    if (text.charCodeAt(0) === 0xFEFF) i = 1;
+    for (; i < text.length; i++) {
+      c = text[i];
+      if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+      else if (c === '"') q = true;
+      else if (c === ',') { row.push(f); f = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(f); f = ''; if (row.length > 1 || row[0] !== '') rows.push(row); row = []; }
+      else f += c;
+    }
+    if (f !== '' || row.length) { row.push(f); rows.push(row); }
+    if (!rows.length) return [];
+    var head = rows[0].map(function (x) { return x.trim(); });
+    return rows.slice(1).map(function (r) { var o = {}; head.forEach(function (k, n) { o[k] = r[n] == null ? '' : r[n]; }); return o; });
+  }
+  function csvDate(v) { v = (v || '').trim(); if (!v) return null; var d = new Date(v); return isNaN(d) ? null : d.toISOString(); }
+  function csvSlug(t) { return (t || '').toLowerCase().replace(/[^\p{L}\p{N}_\s-]/gu, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'article'; }
+  function csvConvert(r) {
+    var o = {};
+    CSV_TEXT.forEach(function (c) { var v = r[c] || ''; o[c] = c === 'content' ? v : v.trim(); if (o[c] === '' && c !== 'content' && c !== 'title') o[c] = null; });
+    o.title = (r.title || '').trim().replace(/^\*+|\*+$/g, '').trim();
+    CSV_BOOL.forEach(function (c) { o[c] = (r[c] || '').trim().toLowerCase() === 'true'; });
+    CSV_INT.forEach(function (c) { var n = parseFloat(r[c]); o[c] = isNaN(n) ? null : Math.trunc(n); });
+    o.published_at = csvDate(r.published_at); o.scheduled_publish_at = csvDate(r.scheduled_publish_at);
+    Object.keys(CSV_JSON).forEach(function (c) {
+      var v; try { v = JSON.parse(r[c] || ''); } catch (e) { v = CSV_JSON[c]; }
+      if (c === 'translations' && v && typeof v === 'object' && !Array.isArray(v)) { var t = {}; Object.keys(v).forEach(function (k) { if (v[k] && typeof v[k] === 'object') t[k] = v[k]; }); v = t; }
+      o[c] = Array.isArray(CSV_JSON[c]) === Array.isArray(v) && v && typeof v === 'object' ? v : CSV_JSON[c];
+    });
+    var cd = csvDate(r.created_date); if (cd) o.created_at = cd;
+    o.category = o.category || 'News';
+    if (['draft', 'published', 'scheduled'].indexOf(o.status) < 0) o.status = 'draft';
+    o.content_type = o.content_type || 'rich';
+    return o;
+  }
+  function importCsvDialog() {
+    var pick = h('input', { type: 'file', accept: '.csv,text/csv' }), msg = h('p', { class: 'hint', text: 'Choose a CSV export of articles. Articles that already exist are updated (matched by id), nothing is deleted.' });
+    var go = h('button', { class: 'btn primary', type: 'button', text: 'Import', disabled: true });
+    var close = h('button', { class: 'btn', type: 'button', text: 'Close', onclick: function () { dlg.close(); dlg.remove(); } });
+    var dlg = h('dialog', { class: 'small' }, h('header', {}, h('b', { text: 'Import articles from CSV' })), h('div', { class: 'pickerbody' }, pick, msg, h('div', { class: 'btnrow' }, go, close)));
+    var items = [];
+    pick.addEventListener('change', function () {
+      var f = pick.files[0]; go.disabled = true; items = []; if (!f) return;
+      msg.className = 'hint'; msg.textContent = 'Reading…';
+      f.text().then(function (txt) {
+        items = parseCsv(txt).filter(function (r) { return (r.title || '').trim(); }).map(csvConvert);
+        if (!items.length) { msg.className = 'hint err'; msg.textContent = 'No articles found in this file. It needs a header row with columns like title, content, status.'; return; }
+        return sb.from('articles').select('id,slug,title').then(function (r) {
+          if (r.error) throw r.error;
+          var have = {}, slugs = {}, byTitle = {}; (r.data || []).forEach(function (x) { have[x.id] = x.slug; slugs[x.slug] = true; byTitle[(x.title || '').trim()] = x.id; });
+          var fresh = 0;
+          items.sort(function (a, b) { return (b.published_at || '') < (a.published_at || '') ? -1 : 1; });   /* same order as the website build, so slugs match */
+          items.forEach(function (a) {
+            if (!a.id && byTitle[a.title]) a.id = byTitle[a.title];      /* a file without ids: the same headline means the same article */
+            if (a.id && have[a.id]) { a.slug = have[a.id]; return; }
+            var base = csvSlug(a.title), s = base, n = 1; while (slugs[s]) s = base + '-' + (++n);
+            slugs[s] = true; a.slug = s; fresh++;
+            if (!a.id) delete a.id;
+          });
+          var live = items.filter(function (a) { return a.status === 'published'; }).length;
+          msg.textContent = items.length + ' articles found (' + live + ' published): ' + fresh + ' new, ' + (items.length - fresh) + ' already in the editor and will be updated.';
+          go.disabled = false;
+        });
+      }).catch(function (e) { msg.className = 'hint err'; msg.textContent = errText(e); });
+    });
+    go.onclick = function () {
+      go.disabled = pick.disabled = true; var done = 0, chunks = [], withId = items.filter(function (a) { return a.id; }), noId = items.filter(function (a) { return !a.id; });
+      [withId, noId].forEach(function (g) { for (var i = 0; i < g.length; i += 25) chunks.push({ rows: g.slice(i, i + 25), upsert: g === withId }); });
+      chunks.reduce(function (p, c) {
+        return p.then(function () {
+          msg.className = 'hint'; msg.textContent = 'Importing… ' + done + ' of ' + items.length;
+          var q = c.upsert ? sb.from('articles').upsert(c.rows, { onConflict: 'id' }) : sb.from('articles').insert(c.rows);
+          return q.then(function (r) { if (r.error) throw r.error; done += c.rows.length; });
+        });
+      }, Promise.resolve()).then(function () {
+        msg.className = 'hint ok'; msg.textContent = 'Imported ' + done + ' articles. They are in the list now. Press "Update website" when you want the site to refresh.';
+        toast('Imported ' + done + ' articles'); return loadArticles().then(function () { if (view === 'articles' && listEl) renderList(); });
+      }).catch(function (e) { msg.className = 'hint err'; msg.textContent = 'Stopped after ' + done + ' articles: ' + errText(e) + ' You can run the import again, it continues safely.'; go.disabled = pick.disabled = false; });
+    };
+    document.body.appendChild(dlg); dlg.showModal();
+  }
+
   function mountArticles() {
     if (dashCleanup) { dashCleanup(); dashCleanup = null; }
     var search = h('input', { type: 'text', placeholder: 'Search articles', 'aria-label': 'Search articles', value: query, oninput: function () { query = search.value.toLowerCase(); renderList(); } });
@@ -246,7 +335,7 @@
     });
     listEl = h('div', { class: 'list' });
     var side = h('aside', { class: 'side' },
-      h('div', { class: 'tools' }, h('button', { class: 'btn primary', type: 'button', text: '+ New article', onclick: function () { guard(function () { location.hash = '#/new'; }); } }), search, chips), listEl);
+      h('div', { class: 'tools' }, h('button', { class: 'btn primary', type: 'button', text: '+ New article', onclick: function () { guard(function () { location.hash = '#/new'; }); } }), me.role === 'admin' ? h('button', { class: 'btn', type: 'button', text: 'Import CSV', onclick: importCsvDialog }) : null, search, chips), listEl);
     mainEl = h('main', { class: 'main' });
     stage.replaceChildren(h('div', { class: 'work' }, side, mainEl));
     view = 'articles';
@@ -355,9 +444,11 @@
     if (cur.stopMeter) cur.stopMeter();
     try { cur.room.disconnect(); } catch (e) { /* already gone */ }
     if (cur.mixer) { stopDeck(kind); cur.mixer.stop(); newDeckEl(kind); deckState[kind].ui(); }   /* the old player is tied to the closed mixer */
+    if (kind === 'tv' && tvComp && view !== 'tv') { tvComp.stop(); }   /* nobody is looking at the studio any more: release camera and screen */
     paintTabs();
     return sb.rpc('live_set', { p_kind: kind, p_title: null, p_on: false });
   }
+  var tvComp = null;
   var RES = { '360': [640, 360], '720': [1280, 720], '1080': [1920, 1080] };
   function startMeter(stream, el) {
     var AC = window.AudioContext || window.webkitAudioContext;
@@ -436,6 +527,9 @@
         var peak = 0; for (var i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128));
         var talking = peak > 14; if (talking !== m.talking) { m.talking = talking; apply(); }
       }, 90);
+      m.addElement = function (el) {       /* sound of a video shown to the audience: heard by the audience and by you */
+        try { var src = ctx.createMediaElementSource(el); src.connect(dest); src.connect(ctx.destination); } catch (e) { /* already connected */ }
+      };
       m.set = function (k, v) { m[k] = v; apply(); };
       m.stop = function () { clearInterval(timer); stream.getTracks().forEach(function (t) { t.stop(); }); try { musicSrc.disconnect(); ctx.close(); } catch (e) { /* closed */ } };
       if (ctx.state === 'suspended') ctx.resume();
@@ -463,11 +557,12 @@
         var lp = room.localParticipant;
         var mic = { echoCancellation: S.echo !== false, noiseSuppression: S.noise !== false, autoGainControl: S.agc !== false };
         if (S.mic) mic.deviceId = S.mic;
+        if (mixer && hooks.studio) mixer.addElement(hooks.studio.mediaEl());
         if (mixer) { mixer.micVol = S.micVol == null ? 100 : S.micVol; mixer.musicVol = S.musicVol == null ? 80 : S.musicVol; mixer.duck = S.duck !== false; mixer.set('muted', !!hooks.muted); }
         var steps = [mixer ? lp.publishTrack(new LK.LocalAudioTrack(mixer.track), { source: LK.Track.Source.Microphone }) : lp.setMicrophoneEnabled(true, mic)];
         if (kind === 'tv') {
           var r = RES[S.res] || RES['720'];
-          steps.push(S.source === 'screen' ? lp.setScreenShareEnabled(true) : lp.setCameraEnabled(true, { deviceId: S.cam || undefined, resolution: { width: r[0], height: r[1], frameRate: 30 } }));
+          steps.push(S.source === 'studio' && hooks.studio ? lp.publishTrack(new LK.LocalVideoTrack(hooks.studio.track()), { source: LK.Track.Source.Camera }) : S.source === 'screen' ? lp.setScreenShareEnabled(true) : lp.setCameraEnabled(true, { deviceId: S.cam || undefined, resolution: { width: r[0], height: r[1], frameRate: 30 } }));
         }
         return Promise.all(steps).then(function () {
           return sb.rpc('live_set', { p_kind: kind, p_title: S.title || '', p_on: true });
@@ -612,6 +707,144 @@
       list);
   }
 
+
+  /* ---------------------------------------------------------------- TV studio: program canvas (camera, screen, pictures, videos) */
+  var STUDIO_SCENES = [['cam', 'Camera', '1'], ['media', 'Picture / video', '2'], ['pip', 'Picture + me', '3'], ['screen', 'Screen', '4'], ['screenpip', 'Screen + me', '5'], ['black', 'Black', '6']];
+  function makeCompositor(res) {
+    var W = res[0], H = res[1];
+    var cv = h('canvas', { class: 'livepreview program', width: W, height: H, 'aria-label': 'What the audience sees' });
+    var g = cv.getContext('2d');
+    function vid(muted) { var v = document.createElement('video'); v.playsInline = true; v.muted = muted; v.setAttribute('playsinline', ''); return v; }
+    var cam = vid(true), scr = vid(true), med = vid(false), img = null;
+    var C = { cv: cv, scene: 'cam', caption: '', capOn: false, media: null, loop: true, camStream: null, scrStream: null, timer: null, track: null, onScreenEnd: null };
+    C.mediaEl = function () { return med; };
+    C.resize = function (r) { W = r[0]; H = r[1]; cv.width = W; cv.height = H; if (C.stream) { C.stream.getTracks().forEach(function (t) { t.stop(); }); C.stream = null; } draw(); };
+    function fit(src, sw, sh, x, y, w, h2, cover) {
+      if (!sw || !sh) return;
+      var k = cover ? Math.max(w / sw, h2 / sh) : Math.min(w / sw, h2 / sh), dw = sw * k, dh = sh * k;
+      g.save(); g.beginPath(); g.rect(x, y, w, h2); g.clip(); g.drawImage(src, x + (w - dw) / 2, y + (h2 - dh) / 2, dw, dh); g.restore();
+    }
+    function roundRect(x, y, w, h2, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h2, r); g.arcTo(x + w, y + h2, x, y + h2, r); g.arcTo(x, y + h2, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+    function draw() {
+      g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+      var sc = C.scene, camOk = cam.videoWidth > 0;
+      var mediaSrc = img && C.media && C.media.kind === 'image' ? img : (C.media && C.media.kind === 'video' ? med : null);
+      var mw = mediaSrc === img && img ? img.naturalWidth : med.videoWidth, mh = mediaSrc === img && img ? img.naturalHeight : med.videoHeight;
+      if (sc === 'cam' && camOk) fit(cam, cam.videoWidth, cam.videoHeight, 0, 0, W, H, true);
+      else if ((sc === 'media' || sc === 'pip') && mediaSrc) fit(mediaSrc, mw, mh, 0, 0, W, H, false);
+      else if ((sc === 'screen' || sc === 'screenpip') && scr.videoWidth) fit(scr, scr.videoWidth, scr.videoHeight, 0, 0, W, H, false);
+      if ((sc === 'pip' || sc === 'screenpip') && camOk) {
+        var iw = Math.round(W * 0.26), ih = Math.round(iw * 9 / 16), ix = W - iw - Math.round(W * 0.02), iy = H - ih - Math.round(H * 0.04);
+        g.save(); roundRect(ix, iy, iw, ih, 12); g.clip(); fit(cam, cam.videoWidth, cam.videoHeight, ix, iy, iw, ih, true); g.restore();
+        g.lineWidth = 4; g.strokeStyle = '#fff'; roundRect(ix, iy, iw, ih, 12); g.stroke();
+      }
+      if (C.capOn && C.caption) {
+        var fs = Math.round(H * 0.052), pad = Math.round(fs * 0.55), bh = fs + pad * 2, by = H - bh - Math.round(H * 0.07), bx = Math.round(W * 0.04);
+        g.font = '700 ' + fs + 'px Georgia, "Times New Roman", serif';
+        var tw = Math.min(g.measureText(C.caption).width, W * 0.78), bw = tw + pad * 2 + 10;
+        g.fillStyle = 'rgba(14,17,22,.88)'; g.fillRect(bx, by, bw, bh); g.fillStyle = '#ff6a2b'; g.fillRect(bx, by, 10, bh);
+        g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.fillText(C.caption, bx + pad + 10, by + bh / 2, W * 0.78);
+      }
+    }
+    C.start = function (deviceId) {
+      if (C.camStream) return Promise.resolve();
+      return navigator.mediaDevices.getUserMedia({ video: Object.assign({ width: { ideal: W }, height: { ideal: H } }, deviceId ? { deviceId: { exact: deviceId } } : {}) }).then(function (st) {
+        C.camStream = st; cam.srcObject = st; cam.play().catch(function () {});
+        if (!C.timer) C.timer = setInterval(draw, 33);   /* a timer keeps running while the tab is in the background (requestAnimationFrame would not) */
+      });
+    };
+    C.ensureLoop = function () { if (!C.timer) C.timer = setInterval(draw, 33); };
+    C.track = function () { if (!C.stream) C.stream = cv.captureStream(30); return C.stream.getVideoTracks()[0]; };
+    C.useScreen = function () {
+      if (C.scrStream) return Promise.resolve();
+      if (!navigator.mediaDevices.getDisplayMedia) return Promise.reject(new Error('this browser cannot share a screen'));
+      return navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }).then(function (st) {
+        C.scrStream = st; scr.srcObject = st; scr.play().catch(function () {});
+        st.getVideoTracks()[0].addEventListener('ended', function () { C.scrStream = null; scr.srcObject = null; if (C.scene.indexOf('screen') === 0) C.scene = 'cam'; if (C.onScreenEnd) C.onScreenEnd(); });
+      });
+    };
+    C.showMedia = function (item, url) {
+      C.media = item;
+      if (item.kind === 'image') { img = new Image(); img.src = url; try { med.pause(); } catch (e) { /* ignore */ } return img.decode ? img.decode().catch(function () {}) : Promise.resolve(); }
+      img = null; med.loop = C.loop; med.src = url; return med.play().catch(function () {});
+    };
+    C.setLoop = function (v) { C.loop = v; med.loop = v; };
+    C.fresh = function () {          /* a broadcast needs its own video element: a finished one stays tied to the old audio mixer */
+      var old = med, t = old.currentTime, src = old.src, was = !old.paused; old.pause();
+      med = vid(false); med.loop = C.loop; if (src) { med.src = src; med.currentTime = t || 0; if (was) med.play().catch(function () {}); }
+      return med;
+    };
+    C.stop = function () {
+      clearInterval(C.timer); C.timer = null;
+      [C.camStream, C.scrStream].forEach(function (st) { if (st) st.getTracks().forEach(function (t) { t.stop(); }); });
+      C.camStream = C.scrStream = null; try { med.pause(); } catch (e) { /* ignore */ }
+      if (C.stream) { C.stream.getTracks().forEach(function (t) { t.stop(); }); C.stream = null; }
+    };
+    draw(); return C;
+  }
+
+  /* pictures and videos for the TV studio */
+  function mediaPanel(comp, stops, onPick) {
+    var listEl = h('div', { class: 'tracks mediagrid' }), msg = h('p', { class: 'hint' }), cache = {};
+    var up = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime', multiple: true, 'aria-label': 'Upload pictures or videos' });
+    var loopBox = check('Repeat videos', true, function () { comp.setLoop(loopBox.input.checked); });
+    function urlFor(it) {
+      if (cache[it.id]) return Promise.resolve(cache[it.id]);
+      return sb.storage.from('tvmedia').createSignedUrl(it.path, 3600).then(function (r) {
+        if (r.error || !r.data) throw r.error || new Error('no link');
+        return fetch(r.data.signedUrl).then(function (x) { if (!x.ok) throw new Error('download failed (' + x.status + ')'); return x.blob(); });   /* a local copy keeps the canvas "clean" so it can be broadcast */
+      }).then(function (b) { cache[it.id] = URL.createObjectURL(b); return cache[it.id]; });
+    }
+    stops.push(function () { Object.keys(cache).forEach(function (k) { URL.revokeObjectURL(cache[k]); }); });
+    function load() {
+      sb.from('tv_media').select('*').order('created_at', { ascending: false }).then(function (r) {
+        if (r.error) { listEl.replaceChildren(h('div', { class: 'empty', text: /relation|does not exist|schema cache/i.test(r.error.message) ? 'Run supabase/tvmedia.sql in Supabase first (see the README).' : r.error.message })); return; }
+        var rows = r.data || [];
+        if (!rows.length) { listEl.replaceChildren(h('div', { class: 'empty', text: 'No pictures or videos yet. Upload some above.' })); return; }
+        listEl.replaceChildren.apply(listEl, rows.map(function (it) {
+          var thumb = h('span', { class: 'mthumb', text: it.kind === 'video' ? '▶' : '' });
+          if (it.kind === 'image') sb.storage.from('tvmedia').createSignedUrl(it.path, 3600).then(function (x) { if (x.data) thumb.style.backgroundImage = 'url("' + x.data.signedUrl + '")'; });
+          var show = function (scene) {
+            return function (ev) {
+              var b = ev.currentTarget; b.disabled = true;
+              urlFor(it).then(function (u) { return comp.showMedia(it, u); }).then(function () { onPick(scene); }).catch(function (e) { toast('Could not load "' + it.title + '": ' + errText(e), true); }).then(function () { b.disabled = false; });
+            };
+          };
+          return h('div', { class: 'track' }, thumb, h('span', { class: 'tt' }, h('b', { text: it.title }), h('small', { text: (it.kind === 'video' ? 'Video' : 'Picture') + (it.size ? ' · ' + (it.size / 1048576).toFixed(1) + ' MB' : '') })),
+            h('button', { class: 'btn primary', type: 'button', text: 'Show', onclick: show('media') }),
+            h('button', { class: 'btn', type: 'button', text: '+ me', 'aria-label': 'Show ' + it.title + ' with me in the corner', onclick: show('pip') }),
+            h('button', { class: 'btn', type: 'button', text: 'Delete', onclick: function () {
+              if (!confirm('Delete "' + it.title + '"?')) return;
+              sb.storage.from('tvmedia').remove([it.path]).then(function () { return sb.from('tv_media').delete().eq('id', it.id); }).then(function (x) { if (x && x.error) toast(x.error.message, true); if (comp.media && comp.media.id === it.id) comp.media = null; load(); });
+            } }));
+        }));
+      });
+    }
+    up.addEventListener('change', function () {
+      var files = Array.prototype.slice.call(up.files || []); up.value = ''; if (!files.length) return;
+      var done = 0, bad = [];
+      files.reduce(function (p, f) {
+        return p.then(function () {
+          var kind = /^image\//.test(f.type) ? 'image' : /^video\//.test(f.type) ? 'video' : '';
+          if (!kind) { bad.push(f.name + ' (not a picture or video)'); return; }
+          if (f.size > 52428800) { bad.push(f.name + ' (over 50 MB)'); return; }
+          msg.className = 'hint'; msg.textContent = 'Uploading ' + f.name + '…';
+          var path = Date.now() + '-' + f.name.replace(/[^\w.\-]+/g, '_').slice(-80);
+          return sb.storage.from('tvmedia').upload(path, f, { contentType: f.type }).then(function (r) {
+            if (r.error) throw r.error;
+            return sb.from('tv_media').insert({ title: f.name.replace(/\.[^.]+$/, '').slice(0, 120), path: path, kind: kind, size: f.size });
+          }).then(function (r) { if (r.error) throw r.error; done++; }).catch(function (e) { bad.push(f.name + ' (' + errText(e) + ')'); });
+        });
+      }, Promise.resolve()).then(function () {
+        msg.className = bad.length ? 'hint err' : 'hint ok';
+        msg.textContent = (done ? 'Added ' + done + '. ' : '') + (bad.length ? 'Not added: ' + bad.join('; ') : '');
+        load();
+      });
+    });
+    load();
+    return h('div', {}, h('div', { class: 'uprow' }, up, loopBox.box), msg, listEl);
+  }
+
   /* one studio window per channel: radio and TV have their own settings (saved in this browser) */
   function showDash(kind) {
     var isTv = kind === 'tv', S = loadSet(kind), stops = [];
@@ -619,7 +852,7 @@
     var title = h('input', { type: 'text', value: S.title || '', placeholder: isTv ? 'e.g. Evening news' : 'e.g. Morning bulletin', maxlength: '120', oninput: function () { S.title = title.value; save(); } });
     var mic = h('select', { onchange: function () { S.mic = mic.value; save(); } }, h('option', { value: '', text: 'Default microphone' }));
     var cam = isTv ? h('select', { onchange: function () { S.cam = cam.value; save(); } }, h('option', { value: '', text: 'Default camera' })) : null;
-    var source = isTv ? h('select', { onchange: function () { S.source = source.value; save(); sync(); } }, h('option', { value: 'camera', text: 'Camera and microphone' }), h('option', { value: 'screen', text: 'Screen share and microphone' })) : null;
+    var source = isTv ? h('select', { onchange: function () { S.source = source.value; save(); sync(); } }, h('option', { value: 'camera', text: 'Camera and microphone' }), h('option', { value: 'screen', text: 'Screen share and microphone' }), h('option', { value: 'studio', text: 'Studio: camera, pictures, videos and screen' })) : null;
     if (source) source.value = S.source || 'camera';
     var res = isTv ? h('select', { onchange: function () { S.res = res.value; save(); } }, h('option', { value: '360', text: '360p (saves data)' }), h('option', { value: '720', text: '720p HD' }), h('option', { value: '1080', text: '1080p Full HD' })) : null;
     if (res) res.value = S.res || '720';
@@ -633,7 +866,12 @@
     var go = h('button', { class: 'btn primary big', type: 'button' });
     var test = h('button', { class: 'btn', type: 'button', text: 'Test microphone' });
 
-    function sync() { if (cam) camField.style.display = source.value === 'screen' ? 'none' : ''; if (preview && !onAir[kind]) preview.style.display = 'none'; }
+    var studio = isTv ? studioSection() : null;
+    function sync() {
+      if (cam) camField.style.display = source.value === 'screen' ? 'none' : '';
+      if (preview && !onAir[kind]) preview.style.display = 'none';
+      if (studio) { studio.hidden = source.value !== 'studio'; if (preview) preview.style.display = source.value === 'studio' ? 'none' : preview.style.display; }
+    }
     function fillDevices() {
       if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
       navigator.mediaDevices.enumerateDevices().then(function (list) {
@@ -664,7 +902,7 @@
       badge.textContent = live ? 'ON AIR' : 'OFF AIR'; badge.className = 'airbadge' + (live ? ' on' : '');
       timer.textContent = live ? clock(Date.now() - cur.since) : '';
       status.textContent = live ? 'You are live. Keep this page open (you can switch windows) while you broadcast.' : 'Not broadcasting. Check your settings, then press Start.';
-      if (preview) { preview.style.display = live || S.source !== 'screen' ? '' : 'none'; }
+      if (preview) { preview.style.display = S.source === 'studio' ? 'none' : (live || S.source !== 'screen' ? '' : 'none'); }
       paintTabs();
     }
     var tick = setInterval(function () { if (onAir[kind]) timer.textContent = clock(Date.now() - onAir[kind].since); }, 1000);
@@ -675,7 +913,13 @@
       if (onAir[kind]) return stopLive(kind).then(function () { if (preview) preview.srcObject = null; toast('Off air'); paint(); go.disabled = false; });
       if (testStop) { testStop(); testStop = null; test.textContent = 'Test microphone'; }
       status.textContent = 'Starting… allow the microphone' + (isTv ? (source.value === 'screen' ? ' and pick a screen' : ' and camera') : '') + ' if your browser asks.';
-      loadLiveKit().then(function () { return startLive(kind, S, { preview: preview, onEnd: paint }); })
+      var studioMode = isTv && S.source === 'studio', hooks = { preview: studioMode ? null : preview, onEnd: paint };
+      var ready = Promise.resolve();
+      if (studioMode) {
+        status.textContent = 'Starting… allow the camera and microphone if your browser asks.';
+        ready = tvComp.start(S.cam).then(function () { tvComp.fresh(); hooks.studio = { track: function () { return tvComp.track(); }, mediaEl: function () { return tvComp.mediaEl(); } }; });
+      }
+      ready.then(loadLiveKit).then(function () { return startLive(kind, S, hooks); })
         .then(function (got) {
           if (got.audio) onAir[kind].stopMeter = startMeter(new MediaStream([got.audio]), meter);
           toast('You are on air'); fillDevices();
@@ -683,6 +927,43 @@
         .catch(function (e) { toast(errText(e), true); })
         .then(function () { paint(); go.disabled = false; });
     };
+
+    function studioSection() {
+      if (!tvComp) tvComp = makeCompositor(RES[S.res] || RES['720']);
+      var comp = tvComp, sceneBtns = {}, camMsg = h('p', { class: 'hint' });
+      comp.ensureLoop();
+      function setScene(k) {
+        var need = k.indexOf('screen') === 0 && !comp.scrStream ? comp.useScreen() : Promise.resolve();
+        need.then(function () {
+          if ((k === 'media' || k === 'pip') && !comp.media) { toast('Pick a picture or video below first', true); return; }
+          comp.scene = k; paintScenes();
+        }).catch(function (e) { toast('Could not share the screen: ' + errText(e), true); });
+      }
+      comp.onScreenEnd = function () { paintScenes(); toast('Screen sharing stopped'); };
+      function paintScenes() { Object.keys(sceneBtns).forEach(function (k) { sceneBtns[k].setAttribute('aria-pressed', comp.scene === k ? 'true' : 'false'); sceneBtns[k].classList.toggle('primary', comp.scene === k); }); }
+      var bar = h('div', { class: 'scenes', role: 'group', 'aria-label': 'Scenes' }, STUDIO_SCENES.map(function (sc) {
+        var b = h('button', { class: 'btn', type: 'button', 'data-scene': sc[0], text: sc[1], title: 'Key ' + sc[2], onclick: function () { setScene(sc[0]); } });
+        sceneBtns[sc[0]] = b; return b;
+      }));
+      var cap = h('input', { type: 'text', maxlength: '90', placeholder: 'On-screen caption, e.g. Breaking: city council votes', 'aria-label': 'On-screen caption', value: comp.caption, oninput: function () { comp.caption = cap.value; } });
+      var capBtn = h('button', { class: 'btn', type: 'button', text: comp.capOn ? 'Hide caption' : 'Show caption', onclick: function () { comp.capOn = !comp.capOn; capBtn.textContent = comp.capOn ? 'Hide caption' : 'Show caption'; } });
+      var camBtn = h('button', { class: 'btn', type: 'button', text: comp.camStream ? 'Camera is on' : 'Turn on camera preview', onclick: function () {
+        comp.start(S.cam).then(function () { camBtn.textContent = 'Camera is on'; camMsg.textContent = ''; fillDevices(); }).catch(function (e) { camMsg.className = 'hint err'; camMsg.textContent = 'Could not open the camera: ' + errText(e); });
+      } });
+      if (res) res.addEventListener('change', function () { if (!onAir.tv) comp.resize(RES[res.value] || RES['720']); });
+      function key(e) {
+        if (S.source !== 'studio' || e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName)) return;
+        var sc = STUDIO_SCENES.filter(function (x) { return x[2] === e.key; })[0]; if (sc) { e.preventDefault(); setScene(sc[0]); }
+      }
+      document.addEventListener('keydown', key); stops.push(function () { document.removeEventListener('keydown', key); if (!onAir.tv) comp.stop(); });
+      paintScenes();
+      var box = h('section', { class: 'panel wide studio' }, h('h3', { text: 'Studio: what the audience sees' }),
+        h('div', { class: 'studiogrid' },
+          h('div', {}, comp.cv, bar, h('p', { class: 'hint', text: 'Keys 1 to 6 switch scenes. The picture above is exactly what is broadcast.' }),
+            h('div', { class: 'uprow' }, cap, capBtn), h('div', { class: 'btnrow' }, camBtn), camMsg),
+          h('div', {}, h('h3', { text: 'Pictures and videos' }), mediaPanel(comp, stops, setScene))));
+      return box;
+    }
 
     /* come back to a running broadcast after visiting another window */
     if (onAir[kind] && onAir[kind].video && preview) onAir[kind].video.attach(preview);
@@ -699,7 +980,7 @@
           field('Microphone', mic), camField, res ? field('Video quality', res) : null,
           opt('echo', 'Echo cancellation'), opt('noise', 'Noise suppression'), opt('agc', 'Automatic volume levelling'),
           h('p', { class: 'hint', text: 'Use headphones when you test so the radio does not echo into your microphone.' })),
-        musicPanel(kind, S, save, stops)));
+        studio, musicPanel(kind, S, save, stops)));
   }
 
   /* ---------------------------------------------------------------- newsletter window */
