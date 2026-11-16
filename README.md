@@ -118,7 +118,11 @@ One-time setup: run `supabase/tvmedia.sql` in the Supabase SQL Editor (creates t
 
 Tips: keep the studio tab open while you broadcast; switching to another window inside the editor is fine. Browsers can play most MP4 files but not every one: if a video stays black, use an MP4 made with H.264.
 
-### Importing articles from a CSV file
+#### More TV controls
+
+Under the studio picture: a **Starting soon slate** (key 7) with your own title and an optional countdown timer, a **LIVE bug with clock** (key L), a **scrolling ticker** along the bottom with text you type (key T), and **cross-fades** between scenes (key F to turn on or off). Everything is drawn into the broadcast picture, so viewers see exactly what you see.
+
+## Importing articles from a CSV file
 
 Admins: **Articles → Import CSV**, choose the file (for example your export), check the summary and press Import. New articles are added; articles that already exist (same id, or same headline when the file has no ids) are updated. Nothing is deleted, and you can run it again safely. Then press **Update website**.
 

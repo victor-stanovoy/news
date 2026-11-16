@@ -720,14 +720,16 @@
 
 
   /* ---------------------------------------------------------------- TV studio: program canvas (camera, screen, pictures, videos) */
-  var STUDIO_SCENES = [['cam', 'Camera', '1'], ['media', 'Picture / video', '2'], ['pip', 'Picture + me', '3'], ['screen', 'Screen', '4'], ['screenpip', 'Screen + me', '5'], ['black', 'Black', '6']];
+  var STUDIO_SCENES = [['cam', 'Camera', '1'], ['media', 'Picture / video', '2'], ['pip', 'Picture + me', '3'], ['screen', 'Screen', '4'], ['screenpip', 'Screen + me', '5'], ['black', 'Black', '6'], ['slate', 'Starting soon', '7']];
   function makeCompositor(res) {
     var W = res[0], H = res[1];
     var cv = h('canvas', { class: 'livepreview program', width: W, height: H, 'aria-label': 'What the audience sees' });
     var g = cv.getContext('2d');
     function vid(muted) { var v = document.createElement('video'); v.playsInline = true; v.muted = muted; v.setAttribute('playsinline', ''); return v; }
     var cam = vid(true), scr = vid(true), med = vid(false), img = null;
-    var C = { cv: cv, scene: 'cam', caption: '', capOn: false, media: null, loop: true, camStream: null, scrStream: null, timer: null, track: null, onScreenEnd: null };
+    var C = { cv: cv, scene: 'cam', caption: '', capOn: false, media: null, loop: true, camStream: null, scrStream: null, timer: null, track: null, onScreenEnd: null,
+      fade: true, bug: false, tick: '', tickOn: false, slateTitle: 'Starting soon', slateEnd: 0, fadeAt: 0 };
+    var snap = document.createElement('canvas'); snap.width = W; snap.height = H;
     C.mediaEl = function () { return med; };
     C.resize = function (r) { W = r[0]; H = r[1]; cv.width = W; cv.height = H; if (C.stream) { C.stream.getTracks().forEach(function (t) { t.stop(); }); C.stream = null; } draw(); };
     function fit(src, sw, sh, x, y, w, h2, cover) {
@@ -736,12 +738,52 @@
       g.save(); g.beginPath(); g.rect(x, y, w, h2); g.clip(); g.drawImage(src, x + (w - dw) / 2, y + (h2 - dh) / 2, dw, dh); g.restore();
     }
     function roundRect(x, y, w, h2, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h2, r); g.arcTo(x + w, y + h2, x, y + h2, r); g.arcTo(x, y + h2, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
-    function draw() {
+    /* change scene, with a short cross-fade when it is switched on */
+    C.go = function (k) {
+      if (k !== C.scene && C.fade) { snap.width = W; snap.height = H; snap.getContext('2d').drawImage(cv, 0, 0); C.fadeAt = Date.now(); }
+      C.scene = k;
+    };
+    C.countdown = function (min) { C.slateEnd = min > 0 ? Date.now() + min * 60000 : 0; };
+    function drawSlate() {
+      var gr = g.createLinearGradient(0, 0, W, H); gr.addColorStop(0, '#110c4a'); gr.addColorStop(1, '#2a1c8f'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+      g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#fe2c55'; g.fillRect(W / 2 - W * 0.04, H * 0.3, W * 0.08, 6);
+      g.fillStyle = '#fff'; g.font = '800 ' + Math.round(H * 0.09) + 'px system-ui, Arial, sans-serif'; g.fillText(C.slateTitle || 'Starting soon', W / 2, H * 0.42, W * 0.86);
+      if (C.slateEnd) {
+        var left = Math.max(0, Math.ceil((C.slateEnd - Date.now()) / 1000)), m = Math.floor(left / 60), sec = left % 60;
+        g.font = '700 ' + Math.round(H * 0.2) + 'px system-ui, Arial, sans-serif'; g.fillText((m < 10 ? '0' : '') + m + ':' + (sec < 10 ? '0' : '') + sec, W / 2, H * 0.64);
+      }
+      g.textAlign = 'start';
+    }
+    function overlays() {
+      if (C.bug) {
+        var fs = Math.round(H * 0.04), d = new Date(), t = (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+        g.font = '800 ' + fs + 'px system-ui, Arial, sans-serif'; g.textBaseline = 'middle';
+        var bw = g.measureText('LIVE').width + fs * 0.9, cw = g.measureText(t).width + fs * 0.9, x = W - bw - cw - Math.round(W * 0.03), y = Math.round(H * 0.04), bh = Math.round(fs * 1.5);
+        g.fillStyle = '#fe2c55'; g.fillRect(x, y, bw, bh); g.fillStyle = 'rgba(14,17,22,.88)'; g.fillRect(x + bw, y, cw, bh);
+        g.fillStyle = '#fff'; g.fillText('LIVE', x + fs * 0.45, y + bh / 2); g.fillText(t, x + bw + fs * 0.45, y + bh / 2);
+      }
+      if (C.tickOn && C.tick) {
+        var th = Math.round(H * 0.055), ty = H - th, f2 = Math.round(th * 0.58), gap = '      \u25cf      ';
+        g.fillStyle = '#110c4a'; g.fillRect(0, ty, W, th); g.fillStyle = '#fe2c55'; g.fillRect(0, ty, 8, th);
+        g.font = '700 ' + f2 + 'px system-ui, Arial, sans-serif'; g.textBaseline = 'middle'; g.fillStyle = '#fff';
+        var unit = C.tick + gap, uw = Math.max(1, g.measureText(unit).width), off = (Date.now() / 1000 * W * 0.07) % uw;
+        g.save(); g.beginPath(); g.rect(12, ty, W - 12, th); g.clip();
+        for (var x2 = -off + 20; x2 < W; x2 += uw) g.fillText(unit, x2, ty + th / 2);
+        g.restore();
+      }
+      if (C.fadeAt) {
+        var a = 1 - (Date.now() - C.fadeAt) / 450;
+        if (a <= 0) C.fadeAt = 0; else { g.save(); g.globalAlpha = a; g.drawImage(snap, 0, 0, W, H); g.restore(); }
+      }
+    }
+    function draw() { drawScene(); overlays(); }
+    function drawScene() {
       g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
       var sc = C.scene, camOk = cam.videoWidth > 0;
       var mediaSrc = img && C.media && C.media.kind === 'image' ? img : (C.media && C.media.kind === 'video' ? med : null);
       var mw = mediaSrc === img && img ? img.naturalWidth : med.videoWidth, mh = mediaSrc === img && img ? img.naturalHeight : med.videoHeight;
-      if (sc === 'cam' && camOk) fit(cam, cam.videoWidth, cam.videoHeight, 0, 0, W, H, true);
+      if (sc === 'slate') drawSlate();
+      else if (sc === 'cam' && camOk) fit(cam, cam.videoWidth, cam.videoHeight, 0, 0, W, H, true);
       else if ((sc === 'media' || sc === 'pip') && mediaSrc) fit(mediaSrc, mw, mh, 0, 0, W, H, false);
       else if ((sc === 'screen' || sc === 'screenpip') && scr.videoWidth) fit(scr, scr.videoWidth, scr.videoHeight, 0, 0, W, H, false);
       if ((sc === 'pip' || sc === 'screenpip') && camOk) {
@@ -947,7 +989,7 @@
         var need = k.indexOf('screen') === 0 && !comp.scrStream ? comp.useScreen() : Promise.resolve();
         need.then(function () {
           if ((k === 'media' || k === 'pip') && !comp.media) { toast('Pick a picture or video below first', true); return; }
-          comp.scene = k; paintScenes();
+          comp.go(k); paintScenes();
         }).catch(function (e) { toast('Could not share the screen: ' + errText(e), true); });
       }
       comp.onScreenEnd = function () { paintScenes(); toast('Screen sharing stopped'); };
@@ -958,19 +1000,34 @@
       }));
       var cap = h('input', { type: 'text', maxlength: '90', placeholder: 'On-screen caption, e.g. Breaking: city council votes', 'aria-label': 'On-screen caption', value: comp.caption, oninput: function () { comp.caption = cap.value; } });
       var capBtn = h('button', { class: 'btn', type: 'button', text: comp.capOn ? 'Hide caption' : 'Show caption', onclick: function () { comp.capOn = !comp.capOn; capBtn.textContent = comp.capOn ? 'Hide caption' : 'Show caption'; } });
+      function toggle(label, key, hotkey) {
+        var b = h('button', { class: 'btn', type: 'button', 'aria-pressed': comp[key] ? 'true' : 'false', title: 'Key ' + hotkey, text: label, onclick: function () { comp[key] = !comp[key]; b.setAttribute('aria-pressed', comp[key] ? 'true' : 'false'); b.classList.toggle('primary', comp[key]); } });
+        b.classList.toggle('primary', !!comp[key]); b.dataset.toggle = key; return b;
+      }
+      var tickIn = h('input', { type: 'text', maxlength: '300', placeholder: 'Scrolling ticker text along the bottom', 'aria-label': 'Ticker text', value: comp.tick, oninput: function () { comp.tick = tickIn.value; } });
+      var slateIn = h('input', { type: 'text', maxlength: '60', placeholder: 'Starting soon slate title', 'aria-label': 'Slate title', value: comp.slateTitle, oninput: function () { comp.slateTitle = slateIn.value; } });
+      var minIn = h('input', { type: 'number', min: '0', max: '120', value: '5', 'aria-label': 'Countdown minutes', style: 'width:70px' });
+      var more = h('div', { class: 'tvmore' },
+        h('div', { class: 'btnrow' }, toggle('Cross-fade scenes', 'fade', 'F'), toggle('LIVE bug + clock', 'bug', 'L'), toggle('Ticker', 'tickOn', 'T')),
+        h('div', { class: 'uprow' }, tickIn),
+        h('div', { class: 'uprow' }, slateIn, minIn, h('span', { text: 'min' }),
+          h('button', { class: 'btn', type: 'button', text: 'Start countdown', onclick: function () { comp.countdown(parseInt(minIn.value, 10) || 0); setScene('slate'); } }),
+          h('button', { class: 'btn', type: 'button', text: 'No countdown', onclick: function () { comp.countdown(0); } })));
       var camBtn = h('button', { class: 'btn', type: 'button', text: comp.camStream ? 'Camera is on' : 'Turn on camera preview', onclick: function () {
         comp.start(S.cam).then(function () { camBtn.textContent = 'Camera is on'; camMsg.textContent = ''; fillDevices(); }).catch(function (e) { camMsg.className = 'hint err'; camMsg.textContent = 'Could not open the camera: ' + errText(e); });
       } });
       if (res) res.addEventListener('change', function () { if (!onAir.tv) comp.resize(RES[res.value] || RES['720']); });
       function key(e) {
         if (S.source !== 'studio' || e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName)) return;
+        var tg = { f: 'fade', l: 'bug', t: 'tickOn' }[String(e.key).toLowerCase()];
+        if (tg) { e.preventDefault(); var tb = box.querySelector('[data-toggle=' + tg + ']'); if (tb) tb.click(); return; }
         var sc = STUDIO_SCENES.filter(function (x) { return x[2] === e.key; })[0]; if (sc) { e.preventDefault(); setScene(sc[0]); }
       }
       document.addEventListener('keydown', key); stops.push(function () { document.removeEventListener('keydown', key); if (!onAir.tv) comp.stop(); });
       paintScenes();
       var box = h('section', { class: 'panel wide studio' }, h('h3', { text: 'Studio: what the audience sees' }),
         h('div', { class: 'studiogrid' },
-          h('div', {}, comp.cv, bar, h('p', { class: 'hint', text: 'Keys 1 to 6 switch scenes. The picture above is exactly what is broadcast.' }),
+          h('div', {}, comp.cv, bar, h('p', { class: 'hint', text: 'Keys 1 to 7 switch scenes; F fade, L live bug, T ticker. The picture above is exactly what is broadcast.' }), more,
             h('div', { class: 'uprow' }, cap, capBtn), h('div', { class: 'btnrow' }, camBtn), camMsg),
           h('div', {}, h('h3', { text: 'Pictures and videos' }), mediaPanel(comp, stops, setScene))));
       return box;
