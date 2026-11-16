@@ -215,6 +215,27 @@ Both tickers show the newest articles automatically and are controlled by the `"
 
 Browsers slow down timers in background tabs, so the tab ticker may move slower than the interval you set.
 
+## Search engines (SEO)
+
+Settings > **Search engines (SEO)** controls how Google and others see the site. The build writes `robots.txt` and `sitemap.xml` for you, adds `NewsArticle` / organisation structured data, social-card tags and the canonical address of every page. Options: let search engines index the site or hide it completely, a default description, your X handle, Google Search Console and Bing verification codes, and a switch to ask AI training crawlers (GPTBot, CCBot, ClaudeBot and others) to stay away. Set the **Website address** in Settings first, or the sitemap and canonical links cannot be written.
+
+Note: crawlers only read `robots.txt` at the very top of a domain. On a GitHub Pages address like `name.github.io/news` it is ignored, so for the `noindex` switch and the AI-crawler block to be reliable use a custom domain at the root.
+
+## GDPR lockdown mode
+
+Settings > **Privacy and GDPR** > *Lockdown mode*. When on, the next website update:
+
+- removes polls, the newsletter box and the Live page (the only features that store or send visitor data),
+- adds a browser rule (Content-Security-Policy) so pages cannot contact any outside server or load frames, and sends no referrer,
+- turns embedded videos in articles into plain links,
+- writes an automatic **Privacy** page (footer link) saying exactly this, with your contact email.
+
+Remaining caveat: pictures hosted on other websites are still fetched by the visitor's browser (that site sees their IP address). Host images yourself to avoid it. This is a technical aid, not legal advice.
+
+## Visitor polls
+
+Polls tab (admins and editors): write a question and 2 to 8 answers, choose a **card inside the page** or a **full-screen banner**, where it appears (home, articles, every page), when results are shown, optional start and end time, then **Go live**. It appears on the website immediately with no update. Run `supabase/polls.sql` once in the Supabase SQL Editor. One vote per browser (a random code in local storage); clearing browser data allows a second vote, so treat results as a pulse check, not an election. Lockdown mode switches polls off.
+
 ## Visitor settings page
 
 Every site has a **Settings** page (link in the footer, `/settings/`). Visitors can turn the browser-tab ticker on or off, choose scrolling text or one headline at a time, pick the speed, and choose light, dark or match-my-device. Choices are saved in the visitor's own browser (nothing is sent to a server). If you turn the tab ticker off in `site.json` (`ticker.tab.enabled`), the option is greyed out for everyone.

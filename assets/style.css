@@ -403,3 +403,37 @@ a:hover .card h3,.card a:hover h3,.rowc a:hover h3{text-decoration:none;color:va
 .prefspage button{font:inherit;font-weight:700;border:1px solid var(--ink);background:var(--bg);color:var(--ink);padding:9px 16px;cursor:pointer}
 .prefspage button:hover{background:var(--ink);color:var(--bg)}
 .prefspage .tab-off .sub,.prefspage .tab-off #prefs-preview{opacity:.45;pointer-events:none}
+
+/* visitor polls */
+.pollwrap{padding-top:20px;padding-bottom:4px}
+.pollcard{position:relative;background:var(--bg);border:1px solid var(--line);border-top:4px solid var(--accent);padding:20px 22px 18px;max-width:640px}
+.pollwrap .pollcard{max-width:none}
+.ptag{display:inline-block;background:var(--accent);color:#fff;font-weight:800;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;padding:3px 8px;margin-bottom:10px}
+.pq{margin:0 0 6px;font-size:22px;line-height:1.25}
+.pdesc{margin:0 0 10px;color:var(--muted,inherit);opacity:.85}
+.pform{margin:12px 0 0}
+.popt{display:flex;gap:10px;align-items:center;border:1px solid var(--line);padding:11px 14px;margin:0 0 8px;cursor:pointer}
+.popt:hover{border-color:var(--ink)}
+.popt input{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.prow{display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.pgo{font:inherit;font-weight:800;background:var(--head);color:#fff;border:0;padding:11px 22px;cursor:pointer}
+.pgo:disabled{opacity:.5}
+.pskip{font:inherit;background:none;border:0;color:inherit;text-decoration:underline;cursor:pointer;padding:6px 0;opacity:.8}
+.pmsg{min-height:1.2em;margin:8px 0 0;font-size:14px;color:var(--accent)}
+.pmeta,.pthanks{font-size:13px;opacity:.75;margin:8px 0 0}
+.pthanks{font-size:16px;opacity:1}
+.pres{margin:0 0 12px}
+.plabel{display:flex;justify-content:space-between;gap:12px;margin-bottom:4px}
+.pbar{height:12px;background:var(--soft)}
+.pbar i{display:block;height:100%;background:var(--line);transition:width .5s}
+.pres.mine .pbar i{background:var(--accent)}
+.pres.mine .plabel span{font-weight:800}
+.pnot{margin:12px 0 0;text-align:center}
+.pclose{position:absolute;top:8px;right:10px;font-size:28px;line-height:1;background:none;border:0;color:inherit;cursor:pointer;padding:4px 10px}
+.pollshade{position:fixed;inset:0;z-index:200;background:rgba(10,8,40,.78);display:grid;place-items:center;padding:16px;overflow:auto}
+.pollshade .pollcard{width:min(560px,100%);padding:28px 26px 20px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.pollshade .pq{font-size:26px}
+body.poll-open{overflow:hidden}
+@media (max-width:560px){.pq{font-size:19px}.pollshade .pq{font-size:22px}.pollcard{padding:16px 16px 14px}}
+
+.privlist{padding-left:20px}.privlist li{margin:0 0 12px;line-height:1.5}

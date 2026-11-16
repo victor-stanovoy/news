@@ -217,7 +217,7 @@
       h('button', { class: 'lnk', type: 'button', text: 'Password', onclick: function () { guard(function () { renderPassword(false); }); } }),
       h('button', { class: 'lnk', type: 'button', text: 'Sign out', onclick: function () { guard(signOut); } }));
 
-    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['newsletter', 'Newsletter', '#/newsletter']] : [], me.role === 'admin' ? [['settings', 'Settings', '#/settings']] : []);
+    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['newsletter', 'Newsletter', '#/newsletter'], ['polls', 'Polls', '#/polls']] : [], me.role === 'admin' ? [['settings', 'Settings', '#/settings']] : []);
     tabsEl = h('nav', { class: 'tabs', 'aria-label': 'Workspaces' }, windows.map(function (w) {
       return h('button', { class: 'tab', type: 'button', 'data-v': w[0], onclick: function () { guard(function () { if (location.hash === w[2] || (w[0] === 'articles' && !location.hash)) route(); else location.hash = w[2]; }); } },
         w[1], w[0] === 'radio' || w[0] === 'tv' ? h('i', { class: 'dot', title: 'On air' }) : null);
@@ -368,6 +368,17 @@
       if (dashCleanup) { dashCleanup(); dashCleanup = null; }
       current = null; dirty = false; view = 'settings';
       stage.replaceChildren(showSettings()); paintTabs(); return;
+    }
+    if (location.hash === '#/polls') {
+      if (!canPublish()) { location.hash = ''; return; }
+      if (dashCleanup) { dashCleanup(); dashCleanup = null; }
+      current = null; dirty = false; view = 'polls';
+      stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'empty', text: 'Loading…' }))); paintTabs();
+      loadScript('../assets/polls-editor.js?v=' + ((cfg.ver || {}).polls || '')).then(function () {
+        if (view !== 'polls') return;
+        stage.replaceChildren(window.SparkPolls.mount({ h: h, field: field, check: check, toast: toast, sb: sb, errText: errText }));
+      }).catch(function (e) { stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'msg err', text: errText(e) }))); });
+      return;
     }
     if (location.hash === '#/newsletter') {
       if (!canPublish()) { location.hash = ''; return; }
@@ -1032,7 +1043,7 @@
         return box.replaceChildren(h('div', { class: 'msg err', text: /relation|does not exist|schema cache|permission/i.test(res[0].error.message || '') ? 'Settings are not set up yet. Run supabase/settings.sql in the Supabase SQL Editor (see the README), then reload.' : errText(res[0].error) }));
       }
       var V = deepMerge(cfg.site || {}, (res[0].data && res[0].data.data) || {});
-      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {}; V.newsletter = V.newsletter || {};
+      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {}; V.newsletter = V.newsletter || {}; V.seo = V.seo || {}; V.privacy = V.privacy || {}; V.polls = V.polls || {};
       var st = {}; (res[1].data || []).forEach(function (x) { st[x.key] = x; });
       var mark = function () { dirty = true; dirtyEl.textContent = 'Unsaved changes'; };
       var dirtyEl = h('span', { class: 'dirty' });
@@ -1148,6 +1159,18 @@
             h('p', { class: 'hint', text: 'Connection to LiveKit (the service that carries the broadcast).' }),
             lk.map(function (k) { return k.field; }), lkMsg,
             h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save LiveKit details', onclick: function () { saveKeys(lk, lkMsg, 'LiveKit details'); } }), testBtn)),
+          h('section', { class: 'panel' }, h('h3', { text: 'Search engines (SEO)' }),
+            tick(V.seo, 'indexing', 'Let search engines list the website (turn off to hide the whole site)'),
+            field('Default search description', bind(V.seo, 'default_description', 'text', { maxlength: 200, placeholder: 'Used when a page has no summary' })),
+            h('div', { class: 'row2' }, field('X / Twitter handle', bind(V.seo, 'twitter_site', 'text', { maxlength: 40, placeholder: '@yourname' })),
+              field('Google Search Console code', bind(V.seo, 'google_verification', 'text', { maxlength: 120 }))),
+            field('Bing Webmaster code', bind(V.seo, 'bing_verification', 'text', { maxlength: 120 })),
+            tick(V.seo, 'block_ai_crawlers', 'Ask AI training crawlers (GPTBot, CCBot, ClaudeBot, ...) not to read the site'),
+            h('p', { class: 'hint', text: 'robots.txt and sitemap.xml are created automatically. The sitemap needs the Website address set above.' })),
+          h('section', { class: 'panel' }, h('h3', { text: 'Privacy and GDPR' }),
+            tick(V.privacy, 'lockdown', 'Lockdown mode: collect no visitor data at all (turns off polls, newsletter box and Live page, blocks all outside requests, replaces embeds with links)'),
+            field('Privacy contact email', bind(V.privacy, 'contact', 'text', { maxlength: 120, placeholder: 'privacy@example.com' }), 'Shown on the automatic Privacy page.'),
+            tick(V.polls, 'enabled', 'Allow visitor polls (made in the Polls tab)')),
           h('section', { class: 'panel' }, h('h3', { text: 'Newsletter' }),
             tick(V.newsletter, 'enabled', 'Show the sign-up box on the website (turn on after the email service is connected)'),
             field('Box title', bind(V.newsletter, 'title', 'text', { maxlength: 80, placeholder: 'Get the newsletter' })), field('Box text', bind(V.newsletter, 'blurb', 'text', { maxlength: 240 })),

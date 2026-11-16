@@ -219,3 +219,6 @@ body.focusing{overflow:hidden}
 @media (max-width:820px){.studiogrid{grid-template-columns:minmax(0,1fr)}.scenes .btn{flex:1 1 30%}.track{flex-wrap:wrap}.track .tt{flex-basis:calc(100% - 70px)}}
 
 .brand img{width:30px;height:30px}
+
+.badge{font-size:11px;text-transform:uppercase;letter-spacing:1px;padding:2px 7px;border:1px solid var(--line);vertical-align:middle}.badge.live{background:var(--accent);color:#fff;border-color:var(--accent)}
+.polls .pres{margin:0 0 8px}.polls .plabel{display:flex;justify-content:space-between}.polls .pbar{height:10px;background:var(--line)}.polls .pbar i{display:block;height:100%;background:var(--accent)}

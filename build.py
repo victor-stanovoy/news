@@ -8,6 +8,7 @@ Static news site generator. Python 3.9+, standard library only.
 Drop article CSV files into ./articles/ (any file name, any number of rows).
 See README.md for the column format.
 """
+from urllib.parse import urlsplit
 import csv
 import hashlib
 import html
@@ -59,6 +60,19 @@ DEFAULT_CONFIG = {
     "footer_text": "",
     "newsletter": {"enabled": False,            # subscribe box in the footer and the /newsletter/ page (set up in the editor first)
                    "title": "Get the newsletter", "blurb": "The best of our reporting in your inbox. Free, and you can leave at any time."},
+    "seo": {
+        "indexing": True,           # False = ask search engines to stay away from the whole site (robots.txt + noindex)
+        "twitter_site": "",         # your X/Twitter handle, e.g. @sparknews
+        "default_description": "",  # shown in search results when a page has no summary (falls back to the tagline)
+        "google_verification": "",  # the code from Google Search Console ("HTML tag" method)
+        "bing_verification": "",    # the code from Bing Webmaster Tools
+        "block_ai_crawlers": False, # ask AI training crawlers (GPTBot, CCBot, ...) not to read the site
+    },
+    "privacy": {
+        "lockdown": False,          # GDPR lockdown: no visitor data is collected or sent anywhere (see the Privacy page)
+        "contact": "",              # email shown on the Privacy page for questions about personal data
+    },
+    "polls": {"enabled": True},     # visitor polls: card or full-screen banner (set up in the editor first, needs supabase/polls.sql)
     "live": {"enabled": True},      # "Live" page for live radio and TV (needs the database and supabase/live.sql)
     "supabase": {"url": "", "anon_key": ""},   # the editor and database; both values are safe to publish
     "ticker": {
@@ -442,6 +456,20 @@ def clean_settings(d):
         if isinstance(nl.get("title"), str) and nl["title"].strip(): o["title"] = _str(nl["title"], 80)
         if isinstance(nl.get("blurb"), str): o["blurb"] = _str(nl["blurb"], 240)
         out["newsletter"] = o
+    if isinstance(d.get("seo"), dict):
+        s = d["seo"]; o = {}
+        for k in ("indexing", "block_ai_crawlers"):
+            if k in s: o[k] = bool(s[k])
+        for k, n in (("twitter_site", 40), ("default_description", 200), ("google_verification", 120), ("bing_verification", 120)):
+            if isinstance(s.get(k), str): o[k] = _str(s[k], n)
+        out["seo"] = o
+    if isinstance(d.get("privacy"), dict):
+        s = d["privacy"]; o = {}
+        if "lockdown" in s: o["lockdown"] = bool(s["lockdown"])
+        if isinstance(s.get("contact"), str): o["contact"] = _str(s["contact"], 120)
+        out["privacy"] = o
+    if isinstance(d.get("polls"), dict) and "enabled" in d["polls"]:
+        out["polls"] = {"enabled": bool(d["polls"]["enabled"])}
     if isinstance(d.get("live"), dict) and "enabled" in d["live"]:
         out["live"] = {"enabled": bool(d["live"]["enabled"])}
     t = d.get("ticker")
@@ -649,10 +677,11 @@ class Site:
                 f'{" loading=lazy" if lazy else ""}>')
 
     # -- chrome
-    def head(self, title, root, desc="", image="", path="", kind="website", alts=None):
+    def head(self, title, root, desc="", image="", path="", kind="website", alts=None, ld=None):
         cfg = self.cfg
+        seo = cfg["seo"]
         full = f"{title} | {cfg['site_name']}" if title else cfg["site_name"]
-        desc = desc or cfg["tagline"]
+        desc = desc or seo.get("default_description") or cfg["tagline"]
         base = cfg["base_url"].rstrip("/")
         og = f'<meta property="og:title" content="{esc(title or cfg["site_name"])}">' \
              f'<meta property="og:description" content="{esc(desc)}">' \
@@ -669,14 +698,14 @@ class Site:
         if base and not (image and image.startswith("http")):
             og += f'<meta property="og:image" content="{esc(base)}/assets/og-default.png"><meta name="twitter:card" content="summary_large_image">'
         return (f'<!doctype html><html lang="{esc(cfg["language"])}"><head><meta charset="utf-8">'
-                f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+                f'<meta name="viewport" content="width=device-width,initial-scale=1">{self.seo_tags(ld)}'
                 f'<meta name="color-scheme" content="light dark">'
                 f'<script>try{{var th=localStorage.getItem("spark-theme");if(th)document.documentElement.dataset.theme=th}}catch(e){{}}</script>'
                 f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}{icon}'
                 f'<link rel="stylesheet" href="{root}assets/style.css?v={asset_ver("style.css")}"></head>')
 
     def nl_on(self):
-        return bool(self.cfg["newsletter"].get("enabled")) and bool(db_settings(self.cfg)[0])
+        return not self.locked() and bool(self.cfg["newsletter"].get("enabled")) and bool(db_settings(self.cfg)[0])
 
     def nlbox(self, root):
         if not self.nl_on():
@@ -716,8 +745,65 @@ class Site:
                 '<p id="prefs-msg" class="small" role="status"></p></form></div>')
         return self.page("Settings", body, "../")
 
+    def locked(self):
+        return bool(self.cfg["privacy"].get("lockdown"))
+
+    def seo_tags(self, ld=None):
+        cfg = self.cfg; seo = cfg["seo"]; o = ""
+        o += '<meta name="robots" content="%s">' % ("max-image-preview:large" if seo.get("indexing") else "noindex,nofollow")
+        if seo.get("twitter_site"):
+            o += f'<meta name="twitter:site" content="{esc(seo["twitter_site"])}">'
+        if seo.get("google_verification"):
+            o += f'<meta name="google-site-verification" content="{esc(seo["google_verification"])}">'
+        if seo.get("bing_verification"):
+            o += f'<meta name="msvalidate.01" content="{esc(seo["bing_verification"])}">'
+        if self.locked():
+            o += ('<meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; '
+                  "img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; "
+                  "frame-src 'none'; form-action 'self'; base-uri 'self'\">")
+        if ld and seo.get("indexing"):
+            o += '<script type="application/ld+json">' + json.dumps(ld, ensure_ascii=False).replace("</", "<\\/") + "</script>"
+        return o
+
+    def robots(self):
+        seo = self.cfg["seo"]; base = self.cfg["base_url"].rstrip("/")
+        if not seo.get("indexing"):
+            return "User-agent: *\nDisallow: /\n"
+        pre = urlsplit(base).path.rstrip("/") if base else ""      # a site at example.com/news keeps its pages under /news
+        out = f"User-agent: *\nAllow: /\nDisallow: {pre}/editor/\nDisallow: {pre}/settings/\nDisallow: {pre}/search.html\nDisallow: {pre}/*-embed.html\n"
+        out += "".join(f"Disallow: {pre}{x}\n" for x in seo.get("disallow", []) if isinstance(x, str) and x.startswith("/"))
+        if seo.get("block_ai_crawlers"):
+            for bot in ("GPTBot", "ChatGPT-User", "OAI-SearchBot", "CCBot", "ClaudeBot", "anthropic-ai", "Google-Extended", "PerplexityBot",
+                        "Bytespider", "Amazonbot", "Applebot-Extended", "FacebookBot", "cohere-ai"):
+                out += f"\nUser-agent: {bot}\nDisallow: /\n"
+        if base:
+            out += f"\nSitemap: {base}/sitemap.xml\n"
+        return out
+
+    def privacy_page(self):
+        cfg = self.cfg; locked = self.locked(); li = []
+        li.append("<li><b>Your choices on this device.</b> Theme and tab-ticker choices are kept in your own browser (local storage) so the site can remember them. They never leave your device and contain no personal data.</li>")
+        if locked:
+            li.append("<li><b>Lockdown mode is on.</b> This site does not run polls, newsletter sign-up or live radio and TV, and it makes no requests to any database or third-party service while you read. Embedded videos are shown as plain links. Your browser only talks to this website's own server.</li>")
+            li.append("<li><b>Images.</b> A few images may be hosted elsewhere; if so, your browser asks that host for the picture (your IP address is visible to it). Referrer details are not sent.</li>")
+        else:
+            if self.polls_on():
+                li.append("<li><b>Polls.</b> To count one vote per person, a random code is stored in your browser and sent with your vote. It is not linked to your name or email.</li>")
+            if self.nl_on():
+                li.append("<li><b>Newsletter.</b> If you sign up, we store your email address (and name, if given) to send the newsletter. You confirm by email first and every email has an unsubscribe link, which deletes nothing else about you because nothing else is collected.</li>")
+            if self.live_on():
+                li.append("<li><b>Live radio and TV.</b> Pressing play connects your browser to our streaming provider (LiveKit), which sees your IP address.</li>")
+            li.append("<li><b>Articles.</b> Embedded videos (YouTube, privacy-enhanced mode) load only on pages that include one; the provider then sees your IP address. Share buttons contact the social network only when you click them.</li>")
+        li.append("<li><b>No tracking.</b> This site has no analytics, advertising cookies or fingerprinting.</li>")
+        who = f'<p>Questions about your data, or want your newsletter record deleted? Write to <a href="mailto:{esc(cfg["privacy"]["contact"])}">{esc(cfg["privacy"]["contact"])}</a>.</p>' if cfg["privacy"].get("contact") else ""
+        body = f'<div class="wrap prefspage"><h1>Privacy</h1><p class="lead">What {esc(cfg["site_name"])} stores about you, in plain words.</p><ul class="privlist">{"".join(li)}</ul>{who}</div>'
+        return self.page("Privacy", body, "../")
+
+    def polls_on(self):
+        return not self.locked() and bool(self.cfg.get("polls", {}).get("enabled")) and bool(db_settings(self.cfg)[0])
+
     def live_on(self):
-        return bool(self.cfg["live"].get("enabled")) and bool(db_settings(self.cfg)[0])
+        return not self.locked() and bool(self.cfg["live"].get("enabled")) and bool(db_settings(self.cfg)[0])
 
     def live_page(self):
         url, key = db_settings(self.cfg)
@@ -776,7 +862,7 @@ class Site:
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
         return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
-                f'<p><a href="{root}settings/index.html">Settings</a></p>'
+                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}privacy/index.html">Privacy</a></p>'
                 f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
 
     def ticker_entries(self, root):
@@ -817,13 +903,23 @@ class Site:
             u, k = db_settings(self.cfg)
             data["nl"] = {"url": u, "key": k}
             nl_tag = f'<script src="{root}assets/newsletter.js?v={asset_ver("newsletter.js")}" defer></script>'
+        polls_tag = ""
+        if self.polls_on():
+            u, k = db_settings(self.cfg)
+            data["polls"] = {"url": u, "key": k}
+            polls_tag = f'<script src="{root}assets/polls.js?v={asset_ver("polls.js")}" defer></script>'
         blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
         return (f'<script id="spark-ticker-data" type="application/json">{blob}</script>'
-                f'<script src="{root}assets/site.js?v={asset_ver("site.js")}" defer></script>' + nl_tag)
+                f'<script src="{root}assets/site.js?v={asset_ver("site.js")}" defer></script>' + nl_tag + polls_tag)
 
     def page(self, title, body, root, active="", **kw):
+        if title == "" and not kw.get("ld"):
+            base = self.cfg["base_url"].rstrip("/")
+            kw["ld"] = {"@context": "https://schema.org", "@type": "NewsMediaOrganization", "name": self.cfg["site_name"], "url": base or None,
+                        "logo": f"{base}/assets/logo.png" if base else None, "description": self.cfg["tagline"]}
+            kw["ld"] = {k: v for k, v in kw["ld"].items() if v}
         return (self.head(title, root, **kw) + self.header(root, active) + self.ticker(root)
-                + f'<main id="main">{body}</main>' + self.footer(root))
+                + f'<main id="main" data-page="{"article" if kw.get("kind") == "article" else "home" if title == "" else "other"}">{body}</main>' + self.footer(root))
 
     # -- cards
     def meta(self, a, with_cat=True):
@@ -1020,14 +1116,23 @@ class Site:
                          f'<a href="mailto:?subject={t}&amp;body={share_url}">Email</a></div>')
 
         dattr = f' lang="{lang}" dir="{"rtl" if lang in RTL_LANGS else "ltr"}"' if lang else ""
-        art = f'<article class="wrap narrow"{dattr}>{"".join(parts)}</article>'
+        inner = "".join(parts)
+        if self.locked():
+            inner = re.sub(r'<iframe[^>]*?src="(https?://[^"]+)"[^>]*>\s*</iframe>', lambda m: f'<p><a href="{m.group(1)}" target="_blank" rel="noopener noreferrer">Open embedded content &rsaquo;</a></p>', inner)
+        art = f'<article class="wrap narrow"{dattr}>{inner}</article>'
         if related:
             art += (f'<section class="wrap rel"><h2 class="sec">More in {esc(a.category)}</h2>'
                     f'<div class="grid3">{"".join(self.card(x, root) for x in related)}</div></section>')
         desc = (strip_tags(subtitle or body_html)[:160] if tr else a.excerpt)
         alts = [("x-default", f"a/{a.slug}.html")] + [(l, f"a/{a.slug}.{l}.html") for l in a.translations] if a.translations else None
+        base = self.cfg["base_url"].rstrip("/")
+        ld = {"@context": "https://schema.org", "@type": "NewsArticle", "headline": title[:110], "datePublished": a.date.isoformat(),
+              "description": desc, "author": {"@type": "Person", "name": a.author or self.cfg["site_name"]},
+              "publisher": {"@type": "Organization", "name": self.cfg["site_name"]}}
+        if src and src.startswith("http"): ld["image"] = [src]
+        if base: ld["mainEntityOfPage"] = f"{base}/a/{fname}.html"
         return self.page(title, art, root, active=a.cat_slug, desc=desc, image=src, kind="article",
-                         path=f"a/{fname}.html", alts=alts)
+                         path=f"a/{fname}.html", alts=alts, ld=ld)
 
     def embed_page(self, a):
         h = a.raw_content
@@ -1084,14 +1189,17 @@ def main():
         (OUT / "editor").mkdir()
         url, key = db_settings(cfg)
         site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
-                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter")
+                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls")
         conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys},
-                           "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
+                           "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
                 .replace("{{CSS_VER}}", asset_ver("editor.css")).replace("{{JS_VER}}", asset_ver("editor.js")))
         w("editor/index.html", page)
     w("index.html", site.home())
     w("search.html", site.search_page())
+    (OUT / "privacy").mkdir()
+    w("privacy/index.html", site.privacy_page())
+    w("robots.txt", site.robots())
     (OUT / "settings").mkdir()
     w("settings/index.html", site.settings_page())
     if site.nl_on():
