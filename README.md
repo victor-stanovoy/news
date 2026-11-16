@@ -215,6 +215,12 @@ Both tickers show the newest articles automatically and are controlled by the `"
 
 Browsers slow down timers in background tabs, so the tab ticker may move slower than the interval you set.
 
+## Visitor settings page
+
+Every site has a **Settings** page (link in the footer, `/settings/`). Visitors can turn the browser-tab ticker on or off, choose scrolling text or one headline at a time, pick the speed, and choose light, dark or match-my-device. Choices are saved in the visitor's own browser (nothing is sent to a server). If you turn the tab ticker off in `site.json` (`ticker.tab.enabled`), the option is greyed out for everyone.
+
+**Safari:** the tab ticker is tuned for it: shorter window (Safari shows about 20 characters), non-breaking spaces so Safari does not trim the text, a Web Worker clock because Safari slows normal timers in hidden tabs, and cleanup on `pagehide`. Safari hides tab titles when only one tab is open; that is the browser's behaviour.
+
 ## Dark mode
 
 The site follows the visitor's system setting (light or dark) and has a toggle button in the header that remembers their choice. Colours for both modes are variables at the top of `assets/style.css`.

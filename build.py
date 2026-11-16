@@ -698,6 +698,24 @@ class Site:
                 f'<p class="small">We send a confirmation email first. Every email has an unsubscribe link.</p></div></div>')
         return self.page("Newsletter", body, "../")
 
+    def settings_page(self):
+        def radios(name, opts):
+            return "".join(f'<label class="opt"><input type="radio" name="{name}" value="{v}"><span>{l}</span></label>' for v, l in opts)
+        body = ('<div class="wrap prefspage"><h1>Settings</h1><p class="lead">These choices are saved in this browser only. We do not collect them.</p>'
+                '<form id="prefs" novalidate>'
+                '<fieldset><legend>Browser tab ticker</legend>'
+                '<p class="small">When you switch to another tab or window, the title of this tab can scroll the latest headlines.</p>'
+                '<label class="switch"><input type="checkbox" name="tab"><span>Show headlines in the tab title while I am away</span></label>'
+                '<p id="prefs-off" class="small" hidden>The tab ticker is turned off for this site.</p>'
+                '<div class="sub"><p class="h">Style</p>' + radios("mode", [("scroll", "Scrolling text"), ("headline", "One headline at a time")]) + '</div>'
+                '<div class="sub"><p class="h">Speed</p>' + radios("speed", [("slow", "Slow"), ("normal", "Normal"), ("fast", "Fast")]) + '</div>'
+                '<p><button type="button" id="prefs-preview">Preview in this tab</button></p>'
+                '<p id="prefs-safari" class="small" hidden>Safari shows only about 20 characters of a tab title, and hides titles when there is just one tab open, so the ticker is shortened there.</p>'
+                '</fieldset>'
+                '<fieldset><legend>Appearance</legend>' + radios("theme", [("auto", "Match my device"), ("light", "Light"), ("dark", "Dark")]) + '</fieldset>'
+                '<p id="prefs-msg" class="small" role="status"></p></form></div>')
+        return self.page("Settings", body, "../")
+
     def live_on(self):
         return bool(self.cfg["live"].get("enabled")) and bool(db_settings(self.cfg)[0])
 
@@ -758,6 +776,7 @@ class Site:
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
         return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
+                f'<p><a href="{root}settings/index.html">Settings</a></p>'
                 f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
 
     def ticker_entries(self, root):
@@ -1073,6 +1092,8 @@ def main():
         w("editor/index.html", page)
     w("index.html", site.home())
     w("search.html", site.search_page())
+    (OUT / "settings").mkdir()
+    w("settings/index.html", site.settings_page())
     if site.nl_on():
         (OUT / "newsletter").mkdir()
         w("newsletter/index.html", site.newsletter_page())

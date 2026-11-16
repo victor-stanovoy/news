@@ -392,3 +392,14 @@ a:hover .card h3,.card a:hover h3,.rowc a:hover h3{text-decoration:none;color:va
 .theme svg{display:block;width:18px;height:18px;transform-origin:50% 50%;transition:transform .45s cubic-bezier(.3,.7,.2,1)}
 .theme:hover svg{transform:rotate(180deg)}
 @media (prefers-reduced-motion:reduce){.theme svg{transition:none}}
+
+/* visitor settings page */
+.prefspage{max-width:640px;padding-top:28px;padding-bottom:48px}
+.prefspage fieldset{border:1px solid var(--line);padding:18px 20px;margin:0 0 20px}
+.prefspage legend{font-weight:800;padding:0 8px}
+.prefspage .sub{margin:14px 0 0}.prefspage .h{font-weight:700;margin:0 0 6px;font-size:14px}
+.prefspage .switch,.prefspage .opt{display:flex;gap:10px;align-items:center;padding:6px 0;cursor:pointer}
+.prefspage input{accent-color:var(--accent);width:18px;height:18px}
+.prefspage button{font:inherit;font-weight:700;border:1px solid var(--ink);background:var(--bg);color:var(--ink);padding:9px 16px;cursor:pointer}
+.prefspage button:hover{background:var(--ink);color:var(--bg)}
+.prefspage .tab-off .sub,.prefspage .tab-off #prefs-preview{opacity:.45;pointer-events:none}
