@@ -380,3 +380,8 @@ a:hover .card h3,.card a:hover h3,.rowc a:hover h3{text-decoration:none;color:va
 .top{border-top-width:8px}
 .sec{border-top-width:4px}
 @media (max-width:560px){.body{font-size:17.5px}.hero .ex{font-size:16.5px}}
+
+/* transparent atom mark, no box behind it */
+.spark{width:46px;height:46px;margin:-3px 0}
+.flogo img{width:40px;height:40px}
+@media (max-width:900px){.spark{width:40px;height:40px;margin:-2px 0}}

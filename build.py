@@ -733,7 +733,7 @@ class Site:
         if cfg["logo_left"]:
             tm = "<sup>™</sup>" if "™" in cfg["site_name"] else ""
             logo = (f'<a class="logo" href="{root}index.html" aria-label="{esc(cfg["site_name"])} home">'
-                    f'<img class="spark" src="{root}assets/logo-square.png?v={asset_ver("logo-square.png")}" width="40" height="40" alt="">'
+                    f'<img class="spark" src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="40" height="40" alt="">'
                     f'<span><b>{esc(cfg["logo_left"])}</b>{esc(cfg["logo_right"])}{tm}</span></a>')
         else:
             logo = f'<a class="logo" href="{root}index.html">{esc(cfg["site_name"])}</a>'
@@ -757,7 +757,7 @@ class Site:
         cfg = self.cfg
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
-        return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo-square.png?v={asset_ver("logo-square.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
+        return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
                 f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
 
     def ticker_entries(self, root):
