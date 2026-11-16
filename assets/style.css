@@ -385,3 +385,10 @@ a:hover .card h3,.card a:hover h3,.rowc a:hover h3{text-decoration:none;color:va
 .spark{width:46px;height:46px;margin:-3px 0}
 .flogo img{width:40px;height:40px}
 @media (max-width:900px){.spark{width:40px;height:40px;margin:-2px 0}}
+
+/* theme switch: the button stays still; only the icon turns, centred */
+.theme{display:grid;place-items:center;transform:none!important}
+.theme:hover{transform:none!important}
+.theme svg{display:block;width:18px;height:18px;transform-origin:50% 50%;transition:transform .45s cubic-bezier(.3,.7,.2,1)}
+.theme:hover svg{transform:rotate(180deg)}
+@media (prefers-reduced-motion:reduce){.theme svg{transition:none}}
