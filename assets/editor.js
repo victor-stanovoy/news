@@ -207,7 +207,7 @@
   function renderWork() {
     var bar = h('div', { class: 'bar' },
       h('a', { class: 'brand', href: '../index.html' },
-        h('img', { src: '../assets/logo.png', alt: '', width: '26', height: '26' }),
+        h('img', { src: '../assets/logo-square.png', alt: '', width: '26', height: '26' }),
         'SparkNews', h('small', { text: 'Editor' })),
       h('span', { class: 'sp' }),
       h('span', { class: 'who' }, me.name || me.email, h('b', { text: me.role })),
