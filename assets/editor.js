@@ -1178,13 +1178,13 @@
         var copy = h('button', { class: 'btn', type: 'button', text: 'Copy embed code', onclick: function () { (navigator.clipboard ? navigator.clipboard.writeText(snippet) : Promise.reject()).then(function () { toast('Embed code copied'); }, function () { window.prompt('Copy this embed code', snippet); }); } });
         var nm = h('input', { type: 'text', maxlength: '80', value: p.name || '', 'aria-label': 'Website name', oninput: function () { p.name = nm.value; } });
         var sl = h('input', { type: 'text', maxlength: '40', value: p.slug || '', 'aria-label': 'Label', oninput: function () { p.slug = sl.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'); } });
-        var ur = h('input', { type: 'url', maxlength: '300', value: p.url || '', placeholder: 'https://partner.com/news/{slug}', 'aria-label': 'Partner website address', oninput: function () { p.url = ur.value.trim(); } });
-        var mn = h('select', { 'aria-label': 'On the main site' }, h('option', { value: 'redirect', text: 'Send visitors to the partner website' }), h('option', { value: 'hide', text: 'Show only in the partner embed (hide everywhere else)' }));
+        var ur = h('input', { type: 'url', maxlength: '300', value: p.url || '', placeholder: 'empty = hosted here, or https://partner.com/news/{slug}', 'aria-label': 'Partner website address', oninput: function () { p.url = ur.value.trim(); } });
+        var mn = h('select', { 'aria-label': 'On the main site' }, h('option', { value: 'redirect', text: 'Send visitors to the partner (their copy or website)' }), h('option', { value: 'hide', text: 'Show only in the partner embed (hide everywhere else)' }));
         mn.value = p.main === 'hide' ? 'hide' : 'redirect'; mn.addEventListener('change', function () { p.main = mn.value; });
         var ac = h('input', { type: 'text', maxlength: '7', value: p.accent || '', placeholder: '#1a73e8', 'aria-label': 'Accent colour', oninput: function () { p.accent = ac.value.trim(); } });
         return h('div', { class: 'partner', 'data-i': String(i) },
           h('div', { class: 'row2' }, field('Website name in the embed', nm), field('Label (letters, numbers, dashes)', sl)),
-          field('Partner website address (use {slug} for the story)', ur),
+          field('Partner\u2019s own website address (optional)', ur, 'Leave empty if the partner lives on this website: stories then go to their copy at the embed link below. Otherwise use {slug} for the story name.'),
           h('div', { class: 'row2' }, field('Labelled stories and broadcasts', mn), field('Accent colour (optional)', ac)),
           h('p', { class: 'hint', text: 'Embed link: ' + embed }),
           h('div', { class: 'btnrow' }, copy, h('button', { class: 'btn danger', type: 'button', text: 'Remove', onclick: function () { V.partners.splice(i, 1); draw(); } })));
@@ -1545,7 +1545,7 @@
       ((cfg.site && cfg.site.partners) || []).map(function (p) { return h('option', { value: p.slug, text: p.name + ' (' + p.slug + ')' }); }));
     f.label.value = a.partner_label || '';
     f.pmode = h('select', { onchange: mark }, h('option', { value: '', text: 'Partner default' }), h('option', { value: 'show', text: 'Show in both: here and in the partner embed' }),
-      h('option', { value: 'redirect', text: 'Send visitors here to the partner website' }), h('option', { value: 'hide', text: 'Only in the partner embed (hidden here)' }));
+      h('option', { value: 'redirect', text: 'Send visitors here to the partner' }), h('option', { value: 'hide', text: 'Only in the partner embed (hidden here)' }));
     f.pmode.value = a.partner_mode || '';
 
     /* live updates */

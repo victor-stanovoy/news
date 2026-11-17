@@ -250,14 +250,14 @@ Remaining caveat: pictures hosted on other websites are still fetched by the vis
 
 ## Partners and embeds (white-label copies of the site)
 
-Settings > **Partners and embeds** > *Add partner*. Give each partner a **website name** (anything: it replaces the logo and site name in their copy), a **label** (letters, numbers, dashes), their **website address** (use `{slug}` where the story's name goes, e.g. `https://partner.com/news/{slug}`), an optional accent colour, and a default for labelled stories. Save and wait for the website to update. Each partner then has a full copy of the site (articles, Live radio/TV, polls, newsletter, search, settings) at `/p/<label>/index.html`. The settings page shows that link and a **Copy embed code** button with a ready `<iframe>`.
+Settings > **Partners and embeds** > *Add partner*. Give each partner a **website name** (anything: it replaces the logo and site name in their copy), a **label** (letters, numbers, dashes), optionally their **own website address** (leave it empty if the partner lives on your website: their stories then go to their copy at `/p/<label>/`; otherwise use `{slug}` where the story's name goes, e.g. `https://partner.com/news/{slug}`), an optional accent colour, and a default for labelled stories. Save and wait for the website to update. Each partner then has a full copy of the site (articles, Live radio/TV, polls, newsletter, search, settings) at `/p/<label>/index.html`. The settings page shows that link and a **Copy embed code** button with a ready `<iframe>`.
 
 **Labelling a story:** in the article editor, *More options > Partner label*, then *On this website*:
 
 | Choice | Main website and other embeds | The partner's embed |
 |---|---|---|
 | Show in both | normal story | normal story |
-| Send visitors to the partner website | redirects to the partner's address | normal story |
+| Send visitors to the partner | redirects to the partner's copy on your site (or their own website if you gave one) | normal story |
 | Only in the partner embed | story is left out completely | normal story |
 | Partner default | whatever you chose for the partner | normal story |
 

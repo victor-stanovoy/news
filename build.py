@@ -501,7 +501,8 @@ def clean_settings(d):
             if not isinstance(x, dict): continue
             slug = re.sub(r"[^a-z0-9-]+", "-", str(x.get("slug", "")).lower()).strip("-")[:40]
             url = str(x.get("url", "")).strip()[:300]
-            if not slug or slug in seen or not re.match(r"^https?://[^\s]+$", url): continue
+            if not slug or slug in seen: continue
+            if url and not re.match(r"^https?://[^\s]+$", url): url = ""      # empty = the partner is hosted here, on this website
             seen.add(slug)
             acc = str(x.get("accent", "")).strip()
             ps.append({"slug": slug, "name": _str(x.get("name") or slug, 80), "url": url,
@@ -878,7 +879,11 @@ class Site:
 
     def live_page(self):
         url, key = db_settings(self.cfg)
-        labels = {p["slug"]: {"name": p["name"], "url": p["url"], "main": p["main"]} for p in self.cfg.get("partners", [])}
+        mb = self.cfg.get("_main_base", self.cfg["base_url"].rstrip("/"))
+        up = "../../../" if self.embed else "../"
+        labels = {p["slug"]: {"name": p["name"], "main": p["main"],
+                              "url": p["url"] or (f"{mb}/p/{p['slug']}/live/index.html" if mb else f"{up}p/{p['slug']}/live/index.html")}
+                  for p in self.cfg.get("partners", [])}
         conf = json.dumps({"url": url, "anon_key": key, "labels": labels, "embed": self.embed}).replace("</", "<\\/")
         ctl = ('<div class="ctl"><button class="lbtn" type="button" hidden aria-label="{verb}"><span class="ic">&#9654;</span><span class="tx">{verb}</span></button>'
                '<button class="lmute" type="button" aria-label="Mute" aria-pressed="false" hidden>&#128266;</button>'
@@ -1280,7 +1285,14 @@ class Site:
 
 
 # --------------------------------------------------------------------------- main
-def view_for(arts, partners, viewer):
+def partner_target(p, a, base, viewer):
+    """Where a redirected story goes: the partner's own website if they have one, otherwise their copy hosted on this site."""
+    if p.get("url"):
+        return p["url"].replace("{slug}", a.slug).replace("{id}", str(a.id))
+    return f"{base}/p/{p['slug']}/a/{a.slug}.html" if base else ("../" if not viewer else "../../../") + f"p/{p['slug']}/a/{a.slug}.html"
+
+
+def view_for(arts, partners, viewer, base=""):
     """The articles one copy of the site shows. A labelled article belongs to its partner: everywhere else it is
     redirected to the partner's website, or left out altogether when the partner is set to "hide"."""
     pm = {p["slug"]: p for p in partners}
@@ -1291,7 +1303,7 @@ def view_for(arts, partners, viewer):
         if p and a.label != viewer and mode != "show":          # "show" = it belongs to the partner but also appears everywhere
             if mode == "hide":
                 continue
-            red[a.slug] = p["url"].replace("{slug}", a.slug).replace("{id}", str(a.id))
+            red[a.slug] = partner_target(p, a, base, viewer)
         keep.append(a)
     return keep, red
 
@@ -1371,15 +1383,15 @@ def main():
     partners = cfg.get("partners", [])
     if OUT.exists():
         shutil.rmtree(OUT)
-    keep, red = view_for(arts, partners, None)
+    base = cfg["base_url"].rstrip("/")
+    keep, red = view_for(arts, partners, None, base)
     site = Site(cfg, keep, now)
     write_site(site, keep, red, OUT, True, cfg)
-    base = cfg["base_url"].rstrip("/")
     for p in partners:                      # one full copy of the site per partner, under /p/<label>/
         c2 = copy.deepcopy(cfg)
-        c2.update(site_name=p["name"], logo_left=p["name"], logo_right="", _embed=p["slug"], base_url=f"{base}/p/{p['slug']}" if base else "")
+        c2.update(site_name=p["name"], logo_left=p["name"], logo_right="", _embed=p["slug"], _main_base=base, base_url=f"{base}/p/{p['slug']}" if base else "")
         c2["seo"].update(indexing=False, news_sitemap=False)
-        keep2, red2 = view_for(arts, partners, p["slug"])
+        keep2, red2 = view_for(arts, partners, p["slug"], base)
         write_site(Site(c2, keep2, now), keep2, red2, OUT / "p" / p["slug"], False, c2)
         print(f"Partner embed '{p['slug']}': {len(keep2)} articles -> {OUT / 'p' / p['slug']}")
     print(f"Built {len(keep)} articles in {len(site.cats)} sections -> {OUT}")
