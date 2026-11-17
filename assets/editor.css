@@ -222,3 +222,13 @@ body.focusing{overflow:hidden}
 
 .badge{font-size:11px;text-transform:uppercase;letter-spacing:1px;padding:2px 7px;border:1px solid var(--line);vertical-align:middle}.badge.live{background:var(--accent);color:#fff;border-color:var(--accent)}
 .polls .pres{margin:0 0 8px}.polls .plabel{display:flex;justify-content:space-between}.polls .pbar{height:10px;background:var(--line)}.polls .pbar i{display:block;height:100%;background:var(--accent)}
+
+.board .strips{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:8px 0 14px}
+.strip{display:grid;gap:6px}.strip .meter{height:14px}
+.pads{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0 0 12px}
+.pad{position:relative;min-height:74px;border:1px solid var(--line);background:var(--bg);color:inherit;font:inherit;font-weight:700;padding:10px 8px 8px;cursor:pointer;text-align:left;display:flex;align-items:flex-end}
+.pad:hover{border-color:var(--ink)}.pad.hit{background:var(--accent);color:#fff;border-color:var(--accent)}
+.pad kbd{position:absolute;top:6px;left:8px;font-size:11px;opacity:.7}
+.inl{display:flex;gap:8px;align-items:center}
+.tvmore{margin:12px 0}
+@media (max-width:640px){.pads{grid-template-columns:repeat(2,1fr)}}

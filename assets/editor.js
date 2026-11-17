@@ -524,14 +524,17 @@
     if (S.mic) audio.deviceId = S.mic;
     return navigator.mediaDevices.getUserMedia({ audio: audio }).then(function (stream) {
       var dest = ctx.createMediaStreamDestination(), micGain = ctx.createGain(), musicGain = ctx.createGain(), an = ctx.createAnalyser();
+      var anM = ctx.createAnalyser(), anP = ctx.createAnalyser(), padGain = ctx.createGain(), bufM = new Uint8Array(512), bufP = new Uint8Array(512);
+      anM.fftSize = 512; anP.fftSize = 512; musicGain.connect(anM); padGain.connect(dest); padGain.connect(ctx.destination); padGain.connect(anP);
       var micSrc = ctx.createMediaStreamSource(stream), musicSrc = ctx.createMediaElementSource(d.el);
       an.fftSize = 512; var buf = new Uint8Array(an.fftSize);
       micSrc.connect(micGain); micGain.connect(dest); micSrc.connect(an);
       musicSrc.connect(musicGain); musicGain.connect(dest); musicGain.connect(ctx.destination);   /* you hear the music too, never your own voice */
-      var m = { track: dest.stream.getAudioTracks()[0], muted: false, micVol: 100, musicVol: 80, duck: true, talking: false };
+      var m = { track: dest.stream.getAudioTracks()[0], muted: false, micVol: 100, musicVol: 80, duck: true, talking: false, musicMuted: false, padMuted: false, padVol: 100 };
       function apply() {
         micGain.gain.setTargetAtTime(m.muted ? 0 : m.micVol / 100, ctx.currentTime, 0.03);
-        musicGain.gain.setTargetAtTime(m.musicVol / 100 * (m.duck && m.talking && !m.muted ? 0.2 : 1), ctx.currentTime, 0.2);
+        musicGain.gain.setTargetAtTime(m.musicMuted ? 0 : m.musicVol / 100 * (m.duck && m.talking && !m.muted ? 0.2 : 1), ctx.currentTime, 0.2);
+        padGain.gain.setTargetAtTime(m.padMuted ? 0 : m.padVol / 100, ctx.currentTime, 0.03);
       }
       var timer = setInterval(function () {
         an.getByteTimeDomainData(buf);
@@ -541,6 +544,9 @@
       m.addElement = function (el) {       /* sound of a video shown to the audience: heard by the audience and by you */
         try { var src = ctx.createMediaElementSource(el); src.connect(dest); src.connect(ctx.destination); } catch (e) { /* already connected */ }
       };
+      function peakOf(node, b) { node.getByteTimeDomainData(b); var pk = 0; for (var i = 0; i < b.length; i++) pk = Math.max(pk, Math.abs(b[i] - 128)); return Math.min(1, pk / 128 * 1.4); }
+      m.levels = function () { return { mic: m.muted ? 0 : peakOf(an, buf), music: peakOf(anM, bufM), pads: peakOf(anP, bufP) }; };
+      m.addPad = function (el) { try { ctx.createMediaElementSource(el).connect(padGain); } catch (e) { /* ignore */ } };   /* a jingle pad: its own channel, plays over the music */
       m.set = function (k, v) { m[k] = v; apply(); };
       m.stop = function () { clearInterval(timer); stream.getTracks().forEach(function (t) { t.stop(); }); try { musicSrc.disconnect(); ctx.close(); } catch (e) { /* closed */ } };
       if (ctx.state === 'suspended') ctx.resume();
@@ -569,7 +575,7 @@
         var mic = { echoCancellation: S.echo !== false, noiseSuppression: S.noise !== false, autoGainControl: S.agc !== false };
         if (S.mic) mic.deviceId = S.mic;
         if (mixer && hooks.studio) mixer.addElement(hooks.studio.mediaEl());
-        if (mixer) { mixer.micVol = S.micVol == null ? 100 : S.micVol; mixer.musicVol = S.musicVol == null ? 80 : S.musicVol; mixer.duck = S.duck !== false; mixer.set('muted', !!hooks.muted); }
+        if (mixer) { var dk = deckFor(kind); mixer.musicMuted = !!dk.musMuted; mixer.padMuted = !!dk.padMuted; mixer.padVol = S.padVol == null ? 100 : S.padVol; mixer.micVol = S.micVol == null ? 100 : S.micVol; mixer.musicVol = S.musicVol == null ? 80 : S.musicVol; mixer.duck = S.duck !== false; mixer.set('muted', !!hooks.muted); }
         var steps = [mixer ? lp.publishTrack(new LK.LocalAudioTrack(mixer.track), { source: LK.Track.Source.Microphone }) : lp.setMicrophoneEnabled(true, mic)];
         if (kind === 'tv') {
           var r = RES[S.res] || RES['720'];
@@ -587,6 +593,69 @@
     });
   }
   window.addEventListener('beforeunload', function (e) { if (onAir.radio || onAir.tv || nlDirty) { e.preventDefault(); e.returnValue = ''; } });
+
+
+  /* ---------------------------------------------------------------- jingle pads + channel strips (radio and TV) */
+  var PAD_KEYS = ['q', 'w', 'e', 'r', 'a', 's', 'd', 'f'];
+  function padsPanel(kind, S, save, stops) {
+    var d = deckFor(kind), grid = h('div', { class: 'pads', role: 'group', 'aria-label': 'Jingle pads' }), urls = {}, playing = [];
+    var mixer = function () { return onAir[kind] && onAir[kind].mixer; };
+    var padVol = h('input', { type: 'range', min: 0, max: 150, value: S.padVol == null ? 100 : S.padVol, 'aria-label': 'Jingle pad volume', oninput: function () { S.padVol = padVol.value * 1; save(); setVol(); } });
+    function setVol() { var m = mixer(); if (m) m.set('padVol', padVol.value * 1); playing.forEach(function (a) { try { a.volume = Math.min(1, padVol.value / 100); } catch (e) { /* ignore */ } }); }
+    function padTracks() {
+      var j = d.tracks.filter(function (t) { return t.kind === 'jingle'; }), rest = d.tracks.filter(function (t) { return t.kind !== 'jingle'; });
+      return j.concat(rest).slice(0, 8);
+    }
+    function fire(t, btn) {
+      var go = urls[t.id] ? Promise.resolve(urls[t.id]) : sb.storage.from('audio').createSignedUrl(t.path, 3600).then(function (r) { if (r.error) throw r.error; return (urls[t.id] = r.data.signedUrl); });
+      return go.then(function (u) {
+        var a = new Audio(); a.crossOrigin = 'anonymous'; a.src = u; a.volume = mixer() ? 1 : Math.min(1, padVol.value / 100);
+        if (mixer()) mixer().addPad(a);
+        playing.push(a); btn.classList.add('hit');
+        a.addEventListener('ended', function () { playing = playing.filter(function (x) { return x !== a; }); btn.classList.remove('hit'); });
+        return a.play();
+      }).catch(function (e) { toast('Could not play "' + t.title + '": ' + errText(e), true); });
+    }
+    function draw() {
+      var list = padTracks();
+      if (!list.length) { grid.replaceChildren(h('div', { class: 'empty', text: 'Upload jingles in "Music & jingles" and they appear here as pads.' })); return; }
+      grid.replaceChildren.apply(grid, list.map(function (t, i) {
+        return h('button', { class: 'pad', type: 'button', 'data-pad': String(i), title: 'Key ' + PAD_KEYS[i].toUpperCase(), onclick: function (ev) { fire(t, ev.currentTarget); } },
+          h('kbd', { text: PAD_KEYS[i].toUpperCase() }), h('span', { text: t.title }));
+      }));
+    }
+    function key(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName)) return;
+      var i = PAD_KEYS.indexOf(String(e.key).toLowerCase()); if (i < 0) return;
+      var b = grid.querySelector('[data-pad="' + i + '"]'); if (b) { e.preventDefault(); b.click(); }
+    }
+    document.addEventListener('keydown', key);
+    var prevTracks = d.padsUi; d.padsUi = draw;
+    var stopAll = h('button', { class: 'btn', type: 'button', text: 'Stop pads', onclick: function () { playing.forEach(function (a) { try { a.pause(); } catch (e) { /* ignore */ } }); playing = []; grid.querySelectorAll('.hit').forEach(function (b) { b.classList.remove('hit'); }); } });
+    /* channel strips: level meter and mute for each source */
+    function strip(label, key, mute) {
+      var fill = h('i'), vu = h('div', { class: 'meter', role: 'img', 'aria-label': label + ' level' }, fill);
+      var btn = h('button', { class: 'btn', type: 'button', 'aria-pressed': 'false', text: 'Mute', onclick: function () { mute(btn); } });
+      return { el: h('div', { class: 'strip', 'data-strip': key }, h('b', { text: label }), vu, btn), fill: fill, btn: btn };
+    }
+    var sMic = strip('Mic', 'mic', function (b) { micMuted[kind] = !micMuted[kind]; if (mixer()) mixer().set('muted', micMuted[kind]); d.ui(); sync(); });
+    var sMus = strip('Music', 'music', function () { d.musMuted = !d.musMuted; if (mixer()) mixer().set('musicMuted', d.musMuted); else d.el.muted = d.musMuted; sync(); });
+    var sPad = strip('Pads', 'pads', function () { d.padMuted = !d.padMuted; if (mixer()) mixer().set('padMuted', d.padMuted); sync(); });
+    function sync() {
+      [[sMic, micMuted[kind]], [sMus, d.musMuted], [sPad, d.padMuted]].forEach(function (x) { x[0].btn.setAttribute('aria-pressed', x[1] ? 'true' : 'false'); x[0].btn.classList.toggle('danger', !!x[1]); x[0].btn.textContent = x[1] ? 'Muted' : 'Mute'; });
+    }
+    var vu = setInterval(function () {
+      var m = mixer(), L = m && m.levels ? m.levels() : { mic: 0, music: 0, pads: 0 };
+      sMic.fill.style.width = L.mic * 100 + '%'; sMus.fill.style.width = L.music * 100 + '%'; sPad.fill.style.width = L.pads * 100 + '%';
+    }, 70);
+    stops.push(function () { clearInterval(vu); document.removeEventListener('keydown', key); d.padsUi = prevTracks; playing.forEach(function (a) { try { a.pause(); } catch (e) { /* ignore */ } }); });
+    d.ui = (function (old) { return function () { old(); sync(); }; })(d.ui);
+    draw(); sync();
+    return h('section', { class: 'panel wide board' }, h('h3', { text: 'Jingle pads and mixer' }),
+      h('div', { class: 'strips' }, sMic.el, sMus.el, sPad.el),
+      grid, h('div', { class: 'btnrow' }, stopAll, h('label', { class: 'inl' }, 'Pad volume ', padVol)),
+      h('p', { class: 'hint', text: 'Keys Q W E R / A S D F fire the pads. Pads play on top of the music and are heard on air. Meters move while you are on air.' }));
+  }
 
   /* the "Music & jingles" panel of a studio */
   var micMuted = { radio: false, tv: false };
@@ -646,7 +715,7 @@
         if (r.error) { list.replaceChildren(h('div', { class: 'msg err', text: /relation|does not exist|schema cache/i.test(r.error.message || '') ? 'The music library is not set up yet. Run supabase/music.sql in Supabase (see the README).' : errText(r.error) })); return; }
         var playing = d.tracks[d.idx]; d.tracks = r.data || [];
         d.idx = playing ? d.tracks.findIndex(function (t) { return t.id === playing.id; }) : -1;
-        renderTracks();
+        renderTracks(); if (d.padsUi) d.padsUi();
       });
     }
     var uploadBtn = h('button', { class: 'btn primary', type: 'button', text: 'Upload', onclick: function () {
@@ -906,7 +975,7 @@
     var mic = h('select', { onchange: function () { S.mic = mic.value; save(); } }, h('option', { value: '', text: 'Default microphone' }));
     var cam = isTv ? h('select', { onchange: function () { S.cam = cam.value; save(); } }, h('option', { value: '', text: 'Default camera' })) : null;
     var source = isTv ? h('select', { onchange: function () { S.source = source.value; save(); sync(); } }, h('option', { value: 'camera', text: 'Camera and microphone' }), h('option', { value: 'screen', text: 'Screen share and microphone' }), h('option', { value: 'studio', text: 'Studio: camera, pictures, videos and screen' })) : null;
-    if (source) source.value = S.source || 'camera';
+    if (source) { if (!S.source) S.source = 'studio'; source.value = S.source; }   /* the studio (scenes, slate, ticker) is the first thing a TV presenter sees */
     var res = isTv ? h('select', { onchange: function () { S.res = res.value; save(); } }, h('option', { value: '360', text: '360p (saves data)' }), h('option', { value: '720', text: '720p HD' }), h('option', { value: '1080', text: '1080p Full HD' })) : null;
     if (res) res.value = S.res || '720';
     var opt = function (key, label) { var c = check(label, S[key] !== false, function () { S[key] = c.input.checked; save(); }); return c.box; };
@@ -1048,7 +1117,7 @@
           field('Microphone', mic), camField, res ? field('Video quality', res) : null,
           opt('echo', 'Echo cancellation'), opt('noise', 'Noise suppression'), opt('agc', 'Automatic volume levelling'),
           h('p', { class: 'hint', text: 'Use headphones when you test so the radio does not echo into your microphone.' })),
-        studio, musicPanel(kind, S, save, stops)));
+        studio, musicPanel(kind, S, save, stops), padsPanel(kind, S, save, stops)));
   }
 
   /* ---------------------------------------------------------------- newsletter window */
@@ -1218,6 +1287,9 @@
             h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save LiveKit details', onclick: function () { saveKeys(lk, lkMsg, 'LiveKit details'); } }), testBtn)),
           h('section', { class: 'panel' }, h('h3', { text: 'Search engines (SEO)' }),
             tick(V.seo, 'indexing', 'Let search engines list the website (turn off to hide the whole site)'),
+            field('Page title ending', bind(V.seo, 'title_suffix', 'text', { maxlength: 60, placeholder: ' | SparkNews  (empty = site name)' })),
+            field('Default share picture (https address)', bind(V.seo, 'default_image', 'text', { maxlength: 300, placeholder: 'https://…/share.png' })),
+            tick(V.seo, 'news_sitemap', 'Write a Google News sitemap (articles of the last 2 days)'),
             field('Default search description', bind(V.seo, 'default_description', 'text', { maxlength: 200, placeholder: 'Used when a page has no summary' })),
             h('div', { class: 'row2' }, field('X / Twitter handle', bind(V.seo, 'twitter_site', 'text', { maxlength: 40, placeholder: '@yourname' })),
               field('Google Search Console code', bind(V.seo, 'google_verification', 'text', { maxlength: 120 }))),
@@ -1225,7 +1297,13 @@
             tick(V.seo, 'block_ai_crawlers', 'Ask AI training crawlers (GPTBot, CCBot, ClaudeBot, ...) not to read the site'),
             h('p', { class: 'hint', text: 'robots.txt and sitemap.xml are created automatically. The sitemap needs the Website address set above.' })),
           h('section', { class: 'panel' }, h('h3', { text: 'Privacy and GDPR' }),
-            tick(V.privacy, 'lockdown', 'Lockdown mode: collect no visitor data at all (turns off polls, newsletter box and Live page, blocks all outside requests, replaces embeds with links)'),
+            tick(V.privacy, 'hide_authors', 'Hide author and editor names on everything published (articles, search data, structured data)'),
+            field('Name to show instead', bind(V.privacy, 'byline', 'text', { maxlength: 60, placeholder: 'e.g. SparkNews Newsroom (empty = site name)' }), 'Authors still see their own names inside the editor. Run supabase/privacy.sql once so the names are also hidden from the public database.'),
+            h('div', { class: 'field' }, h('label', { text: 'Names to remove from article text too' }),
+              (function () { var ta = h('textarea', { rows: '3', placeholder: 'One name per line, e.g. a sign-off or a photo credit', 'aria-label': 'Names to remove' }); ta.value = (V.privacy.redact || []).join('\n');
+                ta.addEventListener('input', function () { V.privacy.redact = ta.value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean); }); return ta; })(),
+              h('small', { class: 'hint', text: 'While names are hidden, these are replaced by the name above everywhere on the website (articles, translations, search).' })),
+            tick(V.privacy, 'lockdown', 'Visitor lockdown: also collect no visitor data at all (turns off polls, newsletter box and Live page, blocks outside requests, replaces embeds with links). Also hides author names.'),
             field('Privacy contact email', bind(V.privacy, 'contact', 'text', { maxlength: 120, placeholder: 'privacy@example.com' }), 'Shown on the automatic Privacy page.'),
             tick(V.polls, 'enabled', 'Allow visitor polls (made in the Polls tab)')),
           h('section', { class: 'panel' }, h('h3', { text: 'Newsletter' }),

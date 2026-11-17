@@ -66,9 +66,15 @@ DEFAULT_CONFIG = {
         "default_description": "",  # shown in search results when a page has no summary (falls back to the tagline)
         "google_verification": "",  # the code from Google Search Console ("HTML tag" method)
         "bing_verification": "",    # the code from Bing Webmaster Tools
+        "title_suffix": "",         # text after every page title, e.g. " | SparkNews" (empty = site name)
+        "default_image": "",        # picture used in social shares when an article has none (full https:// address)
+        "news_sitemap": True,       # also write news-sitemap.xml for Google News (articles of the last 2 days)
         "block_ai_crawlers": False, # ask AI training crawlers (GPTBot, CCBot, ...) not to read the site
     },
     "privacy": {
+        "hide_authors": False,      # leave out the names of authors and editors on every published page, feed and data file
+        "redact": [],               # names to wipe from article text, titles and data too (a sign-off, a photo credit); used while names are hidden
+        "byline": "",               # what to print instead of a name (empty = the site name)
         "lockdown": False,          # GDPR lockdown: no visitor data is collected or sent anywhere (see the Privacy page)
         "contact": "",              # email shown on the Privacy page for questions about personal data
     },
@@ -381,14 +387,25 @@ def fetch_db(cfg):
     if not url or not key:
         return [], set()
     rows, start, page = [], 0, 1000
+    cols = "id,slug,title,subtitle,content,content_type,category,image_url,cover_focus_x,cover_focus_y,additional_images,image_layout,reporter_video_url,status,taken_down,is_breaking,breaking_description,published_at,scheduled_publish_at,is_ai_translated,is_featured,views,is_live_update,live_update_label,live_updates,citations,series_id,series_order,translations,created_at,updated_at"        # never ask for created_by / updated_by: nothing public needs them
     while True:
-        chunk = db_get(url, key, "/rest/v1/articles?select=*&order=id",
+        chunk = db_get(url, key, "/rest/v1/articles?select=" + cols + "&order=id",
                        extra={"Range-Unit": "items", "Range": f"{start}-{start + page - 1}"})
         rows += chunk or []
         if not chunk or len(chunk) < page:
             break
         start += page
     ids = db_get(url, key, "/rest/v1/rpc/known_article_ids", method="POST", body={}) or []
+    # author names come through article_authors(), which is empty when authors are hidden (supabase/privacy.sql);
+    # without privacy.sql installed, fall back to the old open columns
+    auth = db_get(url, key, "/rest/v1/rpc/article_authors", method="POST", body={}, optional=True)
+    if auth is None:
+        got = db_get(url, key, "/rest/v1/articles?select=id,author_name,author_verified&author_name=not.is.null", optional=True) or []
+        auth = {str(r["id"]): {"name": r.get("author_name"), "verified": r.get("author_verified")} for r in got}
+    for r in rows:
+        x = (auth or {}).get(str(r.get("id")))
+        if x:
+            r["author_name"], r["author_verified"] = x.get("name"), x.get("verified")
     print(f"Database: {len(rows)} live articles ({len(ids)} in total)")
     return rows, set(map(str, ids)) | {str(r.get("id")) for r in rows}
 
@@ -460,12 +477,16 @@ def clean_settings(d):
         s = d["seo"]; o = {}
         for k in ("indexing", "block_ai_crawlers"):
             if k in s: o[k] = bool(s[k])
-        for k, n in (("twitter_site", 40), ("default_description", 200), ("google_verification", 120), ("bing_verification", 120)):
+        if "news_sitemap" in s: o["news_sitemap"] = bool(s["news_sitemap"])
+        for k, n in (("title_suffix", 60), ("default_image", 300), ("twitter_site", 40), ("default_description", 200), ("google_verification", 120), ("bing_verification", 120)):
             if isinstance(s.get(k), str): o[k] = _str(s[k], n)
         out["seo"] = o
     if isinstance(d.get("privacy"), dict):
         s = d["privacy"]; o = {}
         if "lockdown" in s: o["lockdown"] = bool(s["lockdown"])
+        if "hide_authors" in s: o["hide_authors"] = bool(s["hide_authors"])
+        if isinstance(s.get("byline"), str): o["byline"] = _str(s["byline"], 60)
+        if isinstance(s.get("redact"), list): o["redact"] = [_str(x, 80) for x in s["redact"] if isinstance(x, str) and len(x.strip()) >= 3][:200]
         if isinstance(s.get("contact"), str): o["contact"] = _str(s["contact"], 120)
         out["privacy"] = o
     if isinstance(d.get("polls"), dict) and "enabled" in d["polls"]:
@@ -680,7 +701,8 @@ class Site:
     def head(self, title, root, desc="", image="", path="", kind="website", alts=None, ld=None):
         cfg = self.cfg
         seo = cfg["seo"]
-        full = f"{title} | {cfg['site_name']}" if title else cfg["site_name"]
+        suf = seo.get("title_suffix")
+        full = (title + (suf if suf else f" | {cfg['site_name']}")) if title else cfg["site_name"]
         desc = desc or seo.get("default_description") or cfg["tagline"]
         base = cfg["base_url"].rstrip("/")
         og = f'<meta property="og:title" content="{esc(title or cfg["site_name"])}">' \
@@ -695,8 +717,10 @@ class Site:
         icon = (f'<link rel="icon" type="image/png" sizes="64x64" href="{root}assets/favicon.png?v={asset_ver("favicon.png")}">'
                 f'<link rel="apple-touch-icon" href="{root}assets/apple-touch-icon.png?v={asset_ver("apple-touch-icon.png")}">'
                 f'<meta name="theme-color" content="#110c4a">')
-        if base and not (image and image.startswith("http")):
-            og += f'<meta property="og:image" content="{esc(base)}/assets/og-default.png"><meta name="twitter:card" content="summary_large_image">'
+        dimg = seo.get("default_image") if str(seo.get("default_image", "")).startswith("https://") else (base + "/assets/og-default.png" if base else "")
+        if dimg and not (image and image.startswith("http")):
+            og += f'<meta property="og:image" content="{esc(dimg)}"><meta name="twitter:card" content="summary_large_image">'
+        og += f'<link rel="alternate" type="application/rss+xml" title="{esc(cfg["site_name"])}" href="{root}feed.xml">'
         return (f'<!doctype html><html lang="{esc(cfg["language"])}"><head><meta charset="utf-8">'
                 f'<meta name="viewport" content="width=device-width,initial-scale=1">{self.seo_tags(ld)}'
                 f'<meta name="color-scheme" content="light dark">'
@@ -745,6 +769,20 @@ class Site:
                 '<p id="prefs-msg" class="small" role="status"></p></form></div>')
         return self.page("Settings", body, "../")
 
+    def redact(self, text):
+        """While names are hidden: replace every listed name (and the authors we still know about) with the byline."""
+        if not self.hide_names():
+            return text
+        if not hasattr(self, "_redact_re"):
+            names = {n.strip() for n in self.cfg["privacy"].get("redact", []) if n.strip()} | {a.author.strip() for a in self.arts if a.author and len(a.author.strip()) >= 4}
+            who = self.cfg["privacy"].get("byline") or self.cfg["site_name"]
+            self._redact_re = (re.compile(r"(?<!\w)(?:" + "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)) + r")(?!\w)", re.I), who) if names else None
+        r = self._redact_re
+        return r[0].sub(lambda m: r[1], text) if r else text
+
+    def hide_names(self):
+        return bool(self.cfg["privacy"].get("hide_authors")) or self.locked()
+
     def locked(self):
         return bool(self.cfg["privacy"].get("lockdown"))
 
@@ -778,6 +816,8 @@ class Site:
                 out += f"\nUser-agent: {bot}\nDisallow: /\n"
         if base:
             out += f"\nSitemap: {base}/sitemap.xml\n"
+            if seo.get("news_sitemap"):
+                out += f"Sitemap: {base}/news-sitemap.xml\n"
         return out
 
     def privacy_page(self):
@@ -794,6 +834,8 @@ class Site:
             if self.live_on():
                 li.append("<li><b>Live radio and TV.</b> Pressing play connects your browser to our streaming provider (LiveKit), which sees your IP address.</li>")
             li.append("<li><b>Articles.</b> Embedded videos (YouTube, privacy-enhanced mode) load only on pages that include one; the provider then sees your IP address. Share buttons contact the social network only when you click them.</li>")
+        if self.hide_names():
+            li.append("<li><b>Our team.</b> Names of individual authors and editors are not published on this site; articles are credited to the newsroom.</li>")
         li.append("<li><b>No tracking.</b> This site has no analytics, advertising cookies or fingerprinting.</li>")
         who = f'<p>Questions about your data, or want your newsletter record deleted? Write to <a href="mailto:{esc(cfg["privacy"]["contact"])}">{esc(cfg["privacy"]["contact"])}</a>.</p>' if cfg["privacy"].get("contact") else ""
         body = f'<div class="wrap prefspage"><h1>Privacy</h1><p class="lead">What {esc(cfg["site_name"])} stores about you, in plain words.</p><ul class="privlist">{"".join(li)}</ul>{who}</div>'
@@ -918,6 +960,9 @@ class Site:
             kw["ld"] = {"@context": "https://schema.org", "@type": "NewsMediaOrganization", "name": self.cfg["site_name"], "url": base or None,
                         "logo": f"{base}/assets/logo.png" if base else None, "description": self.cfg["tagline"]}
             kw["ld"] = {k: v for k, v in kw["ld"].items() if v}
+            if base:
+                kw["ld"] = [kw["ld"], {"@context": "https://schema.org", "@type": "WebSite", "name": self.cfg["site_name"], "url": base + "/",
+                                       "potentialAction": {"@type": "SearchAction", "target": f"{base}/search.html?q={{search_term_string}}", "query-input": "required name=search_term_string"}}]
         return (self.head(title, root, **kw) + self.header(root, active) + self.ticker(root)
                 + f'<main id="main" data-page="{"article" if kw.get("kind") == "article" else "home" if title == "" else "other"}">{body}</main>' + self.footer(root))
 
@@ -1033,7 +1078,10 @@ class Site:
         parts = []
 
         by = ""
-        if a.author:
+        if self.hide_names():
+            who = self.cfg["privacy"].get("byline") or self.cfg["site_name"]
+            by = f'<span class="by">By <strong>{esc(who)}</strong></span>'
+        elif a.author:
             by = f'<span class="by">By <strong>{esc(a.author)}</strong>{" ✓" if a.verified else ""}</span>'
         upd = ""
         if a.updated and (a.updated - a.date) > timedelta(hours=1):
@@ -1127,10 +1175,16 @@ class Site:
         alts = [("x-default", f"a/{a.slug}.html")] + [(l, f"a/{a.slug}.{l}.html") for l in a.translations] if a.translations else None
         base = self.cfg["base_url"].rstrip("/")
         ld = {"@context": "https://schema.org", "@type": "NewsArticle", "headline": title[:110], "datePublished": a.date.isoformat(),
-              "description": desc, "author": {"@type": "Person", "name": a.author or self.cfg["site_name"]},
+              "description": desc, "author": ({"@type": "Organization", "name": self.cfg["privacy"].get("byline") or self.cfg["site_name"]} if self.hide_names() or not a.author
+                                   else {"@type": "Person", "name": a.author}),
               "publisher": {"@type": "Organization", "name": self.cfg["site_name"]}}
         if src and src.startswith("http"): ld["image"] = [src]
         if base: ld["mainEntityOfPage"] = f"{base}/a/{fname}.html"
+        if base:
+            ld = [ld, {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{base}/index.html"},
+                {"@type": "ListItem", "position": 2, "name": a.category, "item": f"{base}/c/{a.cat_slug}.html"},
+                {"@type": "ListItem", "position": 3, "name": title[:110]}]}]
         return self.page(title, art, root, active=a.cat_slug, desc=desc, image=src, kind="article",
                          path=f"a/{fname}.html", alts=alts, ld=ld)
 
@@ -1148,11 +1202,32 @@ class Site:
         base = self.cfg["base_url"].rstrip("/")
         if not base:
             return None
-        urls = [f"{base}/index.html"] + [f"{base}/c/{s}.html" for s in self.cats] + \
-               [f"{base}/a/{a.slug}.html" for a in self.arts] + \
-               [f"{base}/a/{a.slug}.{l}.html" for a in self.arts for l in a.translations]
-        return ('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-                + "".join(f"<url><loc>{esc(u)}</loc></url>" for u in urls) + "</urlset>")
+        def u(loc, mod=None, img=None):
+            x = f"<url><loc>{esc(loc)}</loc>"
+            if mod: x += f"<lastmod>{mod.strftime('%Y-%m-%d')}</lastmod>"
+            if img and str(img).startswith("http"): x += f"<image:image><image:loc>{esc(img)}</image:loc></image:image>"
+            return x + "</url>"
+        rows = [u(f"{base}/index.html")] + [u(f"{base}/c/{s}.html") for s in self.cats]
+        for a in self.arts:
+            if a.is_embed: continue
+            mod = a.updated or a.date
+            rows.append(u(f"{base}/a/{a.slug}.html", mod, getattr(a, "image_raw", None)))
+            rows += [u(f"{base}/a/{a.slug}.{l}.html", mod) for l in a.translations]
+        return ('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
+                'xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">' + "".join(rows) + "</urlset>")
+
+    def news_sitemap(self):
+        base = self.cfg["base_url"].rstrip("/")
+        if not base or not self.cfg["seo"].get("news_sitemap"):
+            return None
+        cutoff = self.now - timedelta(days=2)
+        rows = "".join(
+            f"<url><loc>{esc(base)}/a/{esc(a.slug)}.html</loc><news:news><news:publication><news:name>{esc(self.cfg['site_name'])}</news:name>"
+            f"<news:language>{esc(self.cfg['language'][:2])}</news:language></news:publication>"
+            f"<news:publication_date>{a.date.strftime('%Y-%m-%dT%H:%M:%S+00:00')}</news:publication_date><news:title>{esc(a.title)}</news:title></news:news></url>"
+            for a in self.arts if not a.is_embed and a.date >= cutoff)
+        return ('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
+                'xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">' + rows + "</urlset>")
 
     def feed(self):
         base = self.cfg["base_url"].rstrip("/")
@@ -1162,7 +1237,7 @@ class Site:
             items += (f"<item><title>{esc(a.title)}</title><link>{esc(link)}</link><guid>{esc(link)}</guid>"
                       f"<pubDate>{a.date.strftime('%a, %d %b %Y %H:%M:%S +0000')}</pubDate>"
                       f"<category>{esc(a.category)}</category><description>{esc(a.excerpt)}</description></item>")
-        return (f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>{esc(self.cfg["site_name"])}</title>'
+        return (f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><language>{esc(self.cfg["language"])}</language><title>{esc(self.cfg["site_name"])}</title>'
                 f'<link>{esc(base or ".")}</link><description>{esc(self.cfg["tagline"])}</description>{items}</channel></rss>')
 
 
@@ -1183,7 +1258,10 @@ def main():
     if img_dir.exists():
         shutil.copytree(img_dir, OUT / "images")
 
-    w = lambda p, s: (OUT / p).write_text(s, encoding="utf-8")
+    def w(p, s):
+        if not p.startswith("editor/") and p.endswith((".html", ".json", ".xml")):
+            s = site.redact(s)
+        (OUT / p).write_text(s, encoding="utf-8")
     ed = ROOT / "editor" / "index.html"
     if ed.exists():
         (OUT / "editor").mkdir()
@@ -1225,6 +1303,9 @@ def main():
     sm = site.sitemap()
     if sm:
         w("sitemap.xml", sm)
+    ns = site.news_sitemap()
+    if ns:
+        w("news-sitemap.xml", ns)
     w(".nojekyll", "")
     w("404.html", site.page("Page not found",
                             '<div class="wrap empty"><h1>Page not found</h1><p>Try the menu above or search.</p></div>', ""))

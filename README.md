@@ -118,7 +118,11 @@ One-time setup: run `supabase/tvmedia.sql` in the Supabase SQL Editor (creates t
 
 Tips: keep the studio tab open while you broadcast; switching to another window inside the editor is fine. Browsers can play most MP4 files but not every one: if a video stays black, use an MP4 made with H.264.
 
-#### More TV controls
+#### Jingle pads and mixer (radio and TV)
+
+Upload jingles in *Music & jingles*; they become pads (keys Q W E R A S D F) that play on top of the music and are heard on air. Channel strips show live level meters for the microphone, music and pads, each with a mute button.
+
+### More TV controls
 
 Under the studio picture: a **Starting soon slate** (key 7) with your own title and an optional countdown timer, a **LIVE bug with clock** (key L), a **scrolling ticker** along the bottom with text you type (key T), and **cross-fades** between scenes (key F to turn on or off). Everything is drawn into the broadcast picture, so viewers see exactly what you see.
 
@@ -221,11 +225,19 @@ Browsers slow down timers in background tabs, so the tab ticker may move slower 
 
 ## Search engines (SEO)
 
+Extras: Google News sitemap (`news-sitemap.xml`), image and last-changed dates in `sitemap.xml`, breadcrumb and website-search structured data, an RSS link in every page, a custom page-title ending and a default share picture.
+
 Settings > **Search engines (SEO)** controls how Google and others see the site. The build writes `robots.txt` and `sitemap.xml` for you, adds `NewsArticle` / organisation structured data, social-card tags and the canonical address of every page. Options: let search engines index the site or hide it completely, a default description, your X handle, Google Search Console and Bing verification codes, and a switch to ask AI training crawlers (GPTBot, CCBot, ClaudeBot and others) to stay away. Set the **Website address** in Settings first, or the sitemap and canonical links cannot be written.
 
 Note: crawlers only read `robots.txt` at the very top of a domain. On a GitHub Pages address like `name.github.io/news` it is ignored, so for the `noindex` switch and the AI-crawler block to be reliable use a custom domain at the root.
 
-## GDPR lockdown mode
+## Protecting your team's names (GDPR for authors and editors)
+
+Settings > **Privacy and GDPR** > *Hide author and editor names*. While it is on, every published page, the search data and the structured data credit the **newsroom** (or the name you type) instead of a person. The box *Names to remove from article text too* wipes names that appear inside articles (a sign-off, a photo credit) everywhere on the website, translations included. Authors and editors still see their own names inside the editor.
+
+To also hide the names from the public database (anyone could otherwise read the author column through the Supabase API), run `supabase/privacy.sql` once, after `settings.sql`. Run it again whenever you re-run `schema.sql`. Visitors can then no longer read author names or user ids; only the website build can, through a function that returns nothing while names are hidden.
+
+## Visitor lockdown mode
 
 Settings > **Privacy and GDPR** > *Lockdown mode*. When on, the next website update:
 
