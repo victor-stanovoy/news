@@ -248,6 +248,23 @@ Settings > **Privacy and GDPR** > *Lockdown mode*. When on, the next website upd
 
 Remaining caveat: pictures hosted on other websites are still fetched by the visitor's browser (that site sees their IP address). Host images yourself to avoid it. This is a technical aid, not legal advice.
 
+## Partners and embeds (white-label copies of the site)
+
+Settings > **Partners and embeds** > *Add partner*. Give each partner a **website name** (anything: it replaces the logo and site name in their copy), a **label** (letters, numbers, dashes), their **website address** (use `{slug}` where the story's name goes, e.g. `https://partner.com/news/{slug}`), an optional accent colour, and a default for labelled stories. Save and wait for the website to update. Each partner then has a full copy of the site (articles, Live radio/TV, polls, newsletter, search, settings) at `/p/<label>/index.html`. The settings page shows that link and a **Copy embed code** button with a ready `<iframe>`.
+
+**Labelling a story:** in the article editor, *More options > Partner label*, then *On this website*:
+
+| Choice | Main website and other embeds | The partner's embed |
+|---|---|---|
+| Show in both | normal story | normal story |
+| Send visitors to the partner website | redirects to the partner's address | normal story |
+| Only in the partner embed | story is left out completely | normal story |
+| Partner default | whatever you chose for the partner | normal story |
+
+**Labelling a broadcast:** the Radio and TV studios have a *Partner label* box. On the main Live page that broadcast is not played; visitors see "Live now on <partner>" with a link (or nothing at all if the partner is set to hide). Inside that partner's embed it plays normally.
+
+Run `supabase/partners.sql` once for the labels (and `live.sql` again, it now stores the broadcast label). Partner copies are kept out of search engines. Hosting limit: every partner copy duplicates the site's files, so a handful of partners is fine, hundreds is not.
+
 ## Visitor polls
 
 Polls tab (admins and editors): write a question and 2 to 8 answers, choose a **card inside the page** or a **full-screen banner**, where it appears (home, articles, every page), when results are shown, optional start and end time, then **Go live**. It appears on the website immediately with no update. Run `supabase/polls.sql` once in the Supabase SQL Editor. One vote per browser (a random code in local storage); clearing browser data allows a second vote, so treat results as a pulse check, not an election. Lockdown mode switches polls off.

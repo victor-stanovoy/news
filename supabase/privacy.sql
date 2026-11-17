@@ -7,11 +7,11 @@
 -- which returns nothing while "Hide author and editor names" (Settings > Privacy) or Lockdown mode is on.
 
 revoke select on public.articles from anon;
-grant select (id, slug, title, subtitle, content, content_type, category, image_url, cover_focus_x, cover_focus_y,
-              additional_images, image_layout, reporter_video_url, status, taken_down, is_breaking, breaking_description,
-              published_at, scheduled_publish_at, is_ai_translated, is_featured, views, is_live_update, live_update_label,
-              live_updates, citations, series_id, series_order, translations, created_at, updated_at)
-  on public.articles to anon;
+do $$ declare cols text; begin
+  select string_agg(quote_ident(column_name), ', ') into cols from information_schema.columns
+   where table_schema = 'public' and table_name = 'articles' and column_name not in ('author_name', 'author_verified', 'created_by', 'updated_by');
+  execute 'grant select (' || cols || ') on public.articles to anon';
+end $$;
 
 create or replace function public.article_authors()
 returns jsonb language plpgsql security definer stable set search_path = public as $$

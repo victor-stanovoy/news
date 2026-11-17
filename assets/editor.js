@@ -582,7 +582,7 @@
           steps.push(S.source === 'studio' && hooks.studio ? lp.publishTrack(new LK.LocalVideoTrack(hooks.studio.track()), { source: LK.Track.Source.Camera }) : S.source === 'screen' ? lp.setScreenShareEnabled(true) : lp.setCameraEnabled(true, { deviceId: S.cam || undefined, resolution: { width: r[0], height: r[1], frameRate: 30 } }));
         }
         return Promise.all(steps).then(function () {
-          return sb.rpc('live_set', { p_kind: kind, p_title: S.title || '', p_on: true });
+          return sb.rpc('live_set', S.label ? { p_kind: kind, p_title: S.title || '', p_on: true, p_label: S.label } : { p_kind: kind, p_title: S.title || '', p_on: true });
         }).then(function (r) {
           if (r.error) throw r.error;
           onAir[kind] = { room: room, since: Date.now(), video: got.video, mixer: mixer,
@@ -971,6 +971,9 @@
   function showDash(kind) {
     var isTv = kind === 'tv', S = loadSet(kind), stops = [];
     var save = function () { saveSet(kind, S); };
+    var parts = (cfg.site && cfg.site.partners) || [];
+    var partnerSel = parts.length ? h('select', { onchange: function () { S.label = partnerSel.value; save(); } }, h('option', { value: '', text: 'None' }), parts.map(function (p) { return h('option', { value: p.slug, text: p.name + ' (' + p.slug + ')' }); })) : null;
+    if (partnerSel) partnerSel.value = S.label || '';
     var title = h('input', { type: 'text', value: S.title || '', placeholder: isTv ? 'e.g. Evening news' : 'e.g. Morning bulletin', maxlength: '120', oninput: function () { S.title = title.value; save(); } });
     var mic = h('select', { onchange: function () { S.mic = mic.value; save(); } }, h('option', { value: '', text: 'Default microphone' }));
     var cam = isTv ? h('select', { onchange: function () { S.cam = cam.value; save(); } }, h('option', { value: '', text: 'Default camera' })) : null;
@@ -1111,7 +1114,7 @@
       h('div', { class: 'dashhead' }, h('h2', { text: isTv ? 'TV studio' : 'Radio studio' }), badge, timer),
       h('div', { class: 'dashgrid' },
         h('section', { class: 'panel' }, h('h3', { text: 'Broadcast' }),
-          field('Title shown to visitors', title), source ? field('Source', source) : null,
+          field('Title shown to visitors', title), partnerSel ? field('Partner label', partnerSel, 'Optional. Visitors of other sites are sent to the partner\u2019s website for this broadcast.') : null, source ? field('Source', source) : null,
           preview, h('div', { class: 'metrow' }, h('span', { text: 'Mic level' }), meter), status, h('div', { class: 'btnrow' }, go, test)),
         h('section', { class: 'panel' }, h('h3', { text: 'Settings (saved in this browser)' }),
           field('Microphone', mic), camField, res ? field('Video quality', res) : null,
@@ -1162,6 +1165,37 @@
     (function m(x, y) { Object.keys(y || {}).forEach(function (k) { if (y[k] && typeof y[k] === 'object' && !Array.isArray(y[k]) && x[k] && typeof x[k] === 'object') m(x[k], y[k]); else x[k] = y[k]; }); })(o, b || {});
     return o;
   }
+
+  /* partners: white-label copies of the whole site, plus the label that sends stories and broadcasts to them */
+  function partnersPanel(V) {
+    V.partners = V.partners || [];
+    var list = h('div', { class: 'partners' });
+    var base = (V.base_url || '').replace(/\/+$/, '');
+    function draw() {
+      list.replaceChildren.apply(list, V.partners.map(function (p, i) {
+        var embed = (base || 'https://YOUR-SITE') + '/p/' + (p.slug || 'label') + '/index.html';
+        var snippet = '<iframe src="' + embed + '" width="100%" height="900" style="border:0" loading="lazy" allow="autoplay; fullscreen" title="' + (p.name || '').replace(/"/g, '') + '"></iframe>';
+        var copy = h('button', { class: 'btn', type: 'button', text: 'Copy embed code', onclick: function () { (navigator.clipboard ? navigator.clipboard.writeText(snippet) : Promise.reject()).then(function () { toast('Embed code copied'); }, function () { window.prompt('Copy this embed code', snippet); }); } });
+        var nm = h('input', { type: 'text', maxlength: '80', value: p.name || '', 'aria-label': 'Website name', oninput: function () { p.name = nm.value; } });
+        var sl = h('input', { type: 'text', maxlength: '40', value: p.slug || '', 'aria-label': 'Label', oninput: function () { p.slug = sl.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'); } });
+        var ur = h('input', { type: 'url', maxlength: '300', value: p.url || '', placeholder: 'https://partner.com/news/{slug}', 'aria-label': 'Partner website address', oninput: function () { p.url = ur.value.trim(); } });
+        var mn = h('select', { 'aria-label': 'On the main site' }, h('option', { value: 'redirect', text: 'Send visitors to the partner website' }), h('option', { value: 'hide', text: 'Show only in the partner embed (hide everywhere else)' }));
+        mn.value = p.main === 'hide' ? 'hide' : 'redirect'; mn.addEventListener('change', function () { p.main = mn.value; });
+        var ac = h('input', { type: 'text', maxlength: '7', value: p.accent || '', placeholder: '#1a73e8', 'aria-label': 'Accent colour', oninput: function () { p.accent = ac.value.trim(); } });
+        return h('div', { class: 'partner', 'data-i': String(i) },
+          h('div', { class: 'row2' }, field('Website name in the embed', nm), field('Label (letters, numbers, dashes)', sl)),
+          field('Partner website address (use {slug} for the story)', ur),
+          h('div', { class: 'row2' }, field('Labelled stories and broadcasts', mn), field('Accent colour (optional)', ac)),
+          h('p', { class: 'hint', text: 'Embed link: ' + embed }),
+          h('div', { class: 'btnrow' }, copy, h('button', { class: 'btn danger', type: 'button', text: 'Remove', onclick: function () { V.partners.splice(i, 1); draw(); } })));
+      }));
+    }
+    draw();
+    return h('section', { class: 'panel' }, h('h3', { text: 'Partners and embeds' }),
+      h('p', { class: 'hint', text: 'Each partner gets a full copy of this website (articles, Live, polls, newsletter, search) under its own name that they can embed in an iframe. Put the partner\u2019s label on a story or a broadcast to send it to them. Save settings, then wait for the website to update.' }),
+      list, h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Add partner', onclick: function () { V.partners.push({ name: '', slug: '', url: '', main: 'redirect', accent: '' }); draw(); } })));
+  }
+
   function showSettings() {
     var box = h('div', { class: 'dash settings' }, h('div', { class: 'empty', text: 'Loading settings…' }));
     Promise.all([sb.from('site_settings').select('data').eq('id', 1).maybeSingle(), sb.rpc('secret_status')]).then(function (res) {
@@ -1169,7 +1203,7 @@
         return box.replaceChildren(h('div', { class: 'msg err', text: /relation|does not exist|schema cache|permission/i.test(res[0].error.message || '') ? 'Settings are not set up yet. Run supabase/settings.sql in the Supabase SQL Editor (see the README), then reload.' : errText(res[0].error) }));
       }
       var V = deepMerge(cfg.site || {}, (res[0].data && res[0].data.data) || {});
-      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {}; V.newsletter = V.newsletter || {}; V.seo = V.seo || {}; V.privacy = V.privacy || {}; V.polls = V.polls || {};
+      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {}; V.newsletter = V.newsletter || {}; V.seo = V.seo || {}; V.partners = V.partners || []; V.privacy = V.privacy || {}; V.polls = V.polls || {};
       var st = {}; (res[1].data || []).forEach(function (x) { st[x.key] = x; });
       var mark = function () { dirty = true; dirtyEl.textContent = 'Unsaved changes'; };
       var dirtyEl = h('span', { class: 'dirty' });
@@ -1285,6 +1319,7 @@
             h('p', { class: 'hint', text: 'Connection to LiveKit (the service that carries the broadcast).' }),
             lk.map(function (k) { return k.field; }), lkMsg,
             h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save LiveKit details', onclick: function () { saveKeys(lk, lkMsg, 'LiveKit details'); } }), testBtn)),
+          partnersPanel(V),
           h('section', { class: 'panel' }, h('h3', { text: 'Search engines (SEO)' }),
             tick(V.seo, 'indexing', 'Let search engines list the website (turn off to hide the whole site)'),
             field('Page title ending', bind(V.seo, 'title_suffix', 'text', { maxlength: 60, placeholder: ' | SparkNews  (empty = site name)' })),
@@ -1506,6 +1541,12 @@
     f.citations = h('textarea', { class: 'code', placeholder: 'Sources and credits. Separate entries with a blank line.', oninput: mark }); f.citations.value = a.citations || '';
     f.seriesId = h('input', { type: 'text', value: a.series_id || '', oninput: mark }); f.seriesOrder = h('input', { type: 'number', value: a.series_order == null ? '' : a.series_order, oninput: mark });
     var aiT = check('Translations were made automatically', a.is_ai_translated, mark); f.aiTr = aiT.input;
+    f.label = h('select', { onchange: mark }, h('option', { value: '', text: 'None: a normal article' }),
+      ((cfg.site && cfg.site.partners) || []).map(function (p) { return h('option', { value: p.slug, text: p.name + ' (' + p.slug + ')' }); }));
+    f.label.value = a.partner_label || '';
+    f.pmode = h('select', { onchange: mark }, h('option', { value: '', text: 'Partner default' }), h('option', { value: 'show', text: 'Show in both: here and in the partner embed' }),
+      h('option', { value: 'redirect', text: 'Send visitors here to the partner website' }), h('option', { value: 'hide', text: 'Only in the partner embed (hidden here)' }));
+    f.pmode.value = a.partner_mode || '';
 
     /* live updates */
     var liveRows = h('div');
@@ -1556,6 +1597,8 @@
             field('Article type', f.contentType), field('Extra images', f.extra),
             h('div', { class: 'up', style: 'margin:-6px 0 12px' }, h('button', { class: 'btn', type: 'button', text: 'Upload & add', onclick: function () { pickImage(function (u) { f.extra.value = (f.extra.value.trim() ? f.extra.value.trim() + '\n' : '') + u; mark(); }); } })),
             field('Extra images layout', f.layout), field('Video', f.video), field('Sources & credits', f.citations),
+            ((cfg.site && cfg.site.partners || []).length || a.partner_label) ? field('Partner label', f.label, 'The partner\u2019s embed always shows this story.') : null,
+            ((cfg.site && cfg.site.partners || []).length || a.partner_label) ? field('On this website', f.pmode, 'What visitors of the main site (and other embeds) get for a labelled story.') : null,
             h('div', { class: 'row2' }, field('Series ID', f.seriesId), field('Series order', f.seriesOrder)), live.box, liveBox)),
           h('div', { class: 'panel' }, h('h3', { text: 'Translations' }), aiT.box, trBox, trSel),
           delBtn ? h('div', { class: 'panel' }, delBtn) : null)));
@@ -1585,6 +1628,7 @@
         if (o.title || o.content) tr[l] = o;
       });
       d.translations = tr;
+      if (f.label.value || a.partner_label) { d.partner_label = f.label.value || null; d.partner_mode = f.label.value ? (f.pmode.value || null) : null; }   /* only touched when used, so it works before partners.sql is run */
       if (me.role === 'admin') {
         d.content_type = f.contentType.value;
         d.content = f.rawHtml ? f.rawHtml.value : (quill && quill.getLength() > 1 ? quill.root.innerHTML : '');

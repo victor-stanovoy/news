@@ -8,6 +8,7 @@ Static news site generator. Python 3.9+, standard library only.
 Drop article CSV files into ./articles/ (any file name, any number of rows).
 See README.md for the column format.
 """
+import copy
 from urllib.parse import urlsplit
 import csv
 import hashlib
@@ -78,6 +79,7 @@ DEFAULT_CONFIG = {
         "lockdown": False,          # GDPR lockdown: no visitor data is collected or sent anywhere (see the Privacy page)
         "contact": "",              # email shown on the Privacy page for questions about personal data
     },
+    "partners": [],                 # white-label embeds: [{"slug","name","url","main":"redirect|hide","accent"}] (set up in the editor, Settings)
     "polls": {"enabled": True},     # visitor polls: card or full-screen banner (set up in the editor first, needs supabase/polls.sql)
     "live": {"enabled": True},      # "Live" page for live radio and TV (needs the database and supabase/live.sql)
     "supabase": {"url": "", "anon_key": ""},   # the editor and database; both values are safe to publish
@@ -366,7 +368,7 @@ def db_get(url, key, path, method="GET", body=None, extra=None, optional=False):
         except (urllib.error.URLError, TimeoutError, ValueError) as e:
             last = str(e)
         time.sleep(2 * (attempt + 1))
-    if optional and any(x in str(last) for x in ("PGRST205", "42P01", "HTTP 404")):
+    if optional and any(x in str(last) for x in ("PGRST205", "42P01", "HTTP 404", "42703", "does not exist")):
         return None                                  # an optional table that has not been created yet
     hint = ""
     if "404" in str(last):
@@ -387,10 +389,14 @@ def fetch_db(cfg):
     if not url or not key:
         return [], set()
     rows, start, page = [], 0, 1000
-    cols = "id,slug,title,subtitle,content,content_type,category,image_url,cover_focus_x,cover_focus_y,additional_images,image_layout,reporter_video_url,status,taken_down,is_breaking,breaking_description,published_at,scheduled_publish_at,is_ai_translated,is_featured,views,is_live_update,live_update_label,live_updates,citations,series_id,series_order,translations,created_at,updated_at"        # never ask for created_by / updated_by: nothing public needs them
+    cols_nolabel = "id,slug,title,subtitle,content,content_type,category,image_url,cover_focus_x,cover_focus_y,additional_images,image_layout,reporter_video_url,status,taken_down,is_breaking,breaking_description,published_at,scheduled_publish_at,is_ai_translated,is_featured,views,is_live_update,live_update_label,live_updates,citations,series_id,series_order,translations,created_at,updated_at"        # never ask for created_by / updated_by: nothing public needs them
+    cols = cols_nolabel + ",partner_label,partner_mode"            # needs supabase/partners.sql; older databases work without it
     while True:
-        chunk = db_get(url, key, "/rest/v1/articles?select=" + cols + "&order=id",
+        chunk = db_get(url, key, "/rest/v1/articles?select=" + cols + "&order=id", optional=(cols != cols_nolabel),
                        extra={"Range-Unit": "items", "Range": f"{start}-{start + page - 1}"})
+        if chunk is None:
+            cols = cols_nolabel
+            continue
         rows += chunk or []
         if not chunk or len(chunk) < page:
             break
@@ -489,6 +495,19 @@ def clean_settings(d):
         if isinstance(s.get("redact"), list): o["redact"] = [_str(x, 80) for x in s["redact"] if isinstance(x, str) and len(x.strip()) >= 3][:200]
         if isinstance(s.get("contact"), str): o["contact"] = _str(s["contact"], 120)
         out["privacy"] = o
+    if isinstance(d.get("partners"), list):
+        ps, seen = [], set()
+        for x in d["partners"][:30]:
+            if not isinstance(x, dict): continue
+            slug = re.sub(r"[^a-z0-9-]+", "-", str(x.get("slug", "")).lower()).strip("-")[:40]
+            url = str(x.get("url", "")).strip()[:300]
+            if not slug or slug in seen or not re.match(r"^https?://[^\s]+$", url): continue
+            seen.add(slug)
+            acc = str(x.get("accent", "")).strip()
+            ps.append({"slug": slug, "name": _str(x.get("name") or slug, 80), "url": url,
+                       "main": "hide" if x.get("main") == "hide" else "redirect",
+                       "accent": acc if re.match(r"^#[0-9a-fA-F]{6}$", acc) else ""})
+        out["partners"] = ps
     if isinstance(d.get("polls"), dict) and "enabled" in d["polls"]:
         out["polls"] = {"enabled": bool(d["polls"]["enabled"])}
     if isinstance(d.get("live"), dict) and "enabled" in d["live"]:
@@ -617,6 +636,8 @@ def load_articles(cfg, now):
             for lang, v in tdata.items():
                 if isinstance(v, dict) and (v.get("content") or v.get("title")):
                     a.translations[lang.lower()] = v
+        a.label = g("partner_label").lower()
+        a.pmode = g("partner_mode").lower()       # redirect | hide | show (empty = the partner's default)
         a.series_id = g("series_id")
         a.series_order = to_int(g("series_order"))
         a.verified = truthy(g("author_verified"))
@@ -663,6 +684,7 @@ def load_articles(cfg, now):
 class Site:
     def __init__(self, cfg, arts, now):
         self.cfg, self.arts, self.now = cfg, arts, now
+        self.embed = cfg.get("_embed") or ""            # slug of the partner this copy of the site is made for
         cats = {}
         for a in arts:
             cats.setdefault(a.cat_slug, {"name": a.category, "items": []})["items"].append(a)
@@ -726,7 +748,7 @@ class Site:
                 f'<meta name="color-scheme" content="light dark">'
                 f'<script>try{{var th=localStorage.getItem("spark-theme");if(th)document.documentElement.dataset.theme=th}}catch(e){{}}</script>'
                 f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}{icon}'
-                f'<link rel="stylesheet" href="{root}assets/style.css?v={asset_ver("style.css")}"></head>')
+                f'<link rel="stylesheet" href="{root}assets/style.css?v={asset_ver("style.css")}">{self.accent_css()}</head>')
 
     def nl_on(self):
         return not self.locked() and bool(self.cfg["newsletter"].get("enabled")) and bool(db_settings(self.cfg)[0])
@@ -786,6 +808,13 @@ class Site:
     def locked(self):
         return bool(self.cfg["privacy"].get("lockdown"))
 
+    def partner(self, slug):
+        return next((p for p in self.cfg.get("partners", []) if p["slug"] == slug), None)
+
+    def accent_css(self):
+        p = self.partner(self.embed) if self.embed else None
+        return f'<style>:root{{--accent:{p["accent"]};--spark:{p["accent"]}}}</style>' if p and p.get("accent") else ""
+
     def seo_tags(self, ld=None):
         cfg = self.cfg; seo = cfg["seo"]; o = ""
         o += '<meta name="robots" content="%s">' % ("max-image-preview:large" if seo.get("indexing") else "noindex,nofollow")
@@ -808,7 +837,7 @@ class Site:
         if not seo.get("indexing"):
             return "User-agent: *\nDisallow: /\n"
         pre = urlsplit(base).path.rstrip("/") if base else ""      # a site at example.com/news keeps its pages under /news
-        out = f"User-agent: *\nAllow: /\nDisallow: {pre}/editor/\nDisallow: {pre}/settings/\nDisallow: {pre}/search.html\nDisallow: {pre}/*-embed.html\n"
+        out = f"User-agent: *\nAllow: /\nDisallow: {pre}/editor/\nDisallow: {pre}/settings/\nDisallow: {pre}/search.html\nDisallow: {pre}/p/\nDisallow: {pre}/*-embed.html\n"
         out += "".join(f"Disallow: {pre}{x}\n" for x in seo.get("disallow", []) if isinstance(x, str) and x.startswith("/"))
         if seo.get("block_ai_crawlers"):
             for bot in ("GPTBot", "ChatGPT-User", "OAI-SearchBot", "CCBot", "ClaudeBot", "anthropic-ai", "Google-Extended", "PerplexityBot",
@@ -849,7 +878,8 @@ class Site:
 
     def live_page(self):
         url, key = db_settings(self.cfg)
-        conf = json.dumps({"url": url, "anon_key": key}).replace("</", "<\\/")
+        labels = {p["slug"]: {"name": p["name"], "url": p["url"], "main": p["main"]} for p in self.cfg.get("partners", [])}
+        conf = json.dumps({"url": url, "anon_key": key, "labels": labels, "embed": self.embed}).replace("</", "<\\/")
         ctl = ('<div class="ctl"><button class="lbtn" type="button" hidden aria-label="{verb}"><span class="ic">&#9654;</span><span class="tx">{verb}</span></button>'
                '<button class="lmute" type="button" aria-label="Mute" aria-pressed="false" hidden>&#128266;</button>'
                '<input class="lvol" type="range" min="0" max="100" value="80" aria-label="Volume" hidden>{extra}</div>')
@@ -891,7 +921,7 @@ class Site:
                     f'<div class="morep wrap">{"".join(links[n:])}</div></details>')
         livelink = (f'<a class="livelink{" on" if active == "live" else ""}" href="{root}live/index.html"><i></i>Live</a>'
                     if self.live_on() else "")
-        return f'''<body><a class="skip" href="#main">Skip to content</a>
+        return f'''<body{' class="embed"' if self.embed else ''}><a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="wrap bar">
 <span class="dateline">{self.now.strftime("%A, %B ") + str(self.now.day) + self.now.strftime(", %Y")}</span>
 {logo}
@@ -1198,7 +1228,15 @@ class Site:
                 else h.replace("<meta charset", '<base target="_top"><meta charset', 1)
         return h
 
-    def sitemap(self):
+    def redirect_page(self, to, who):
+        to_e = esc(to)
+        return (f'<!doctype html><html lang="{esc(self.cfg["language"])}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                f'<meta name="robots" content="noindex"><meta http-equiv="refresh" content="0;url={to_e}"><link rel="canonical" href="{to_e}">'
+                f'<title>Continue to {esc(who)}</title></head><body style="font-family:system-ui,sans-serif;padding:32px">'
+                f'<p>This story is on <a href="{to_e}">{esc(who)}</a>. Taking you there\u2026</p>'
+                f'<script>location.replace({json.dumps(to)})</script></body></html>')
+
+    def sitemap(self, skip=()):
         base = self.cfg["base_url"].rstrip("/")
         if not base:
             return None
@@ -1209,14 +1247,14 @@ class Site:
             return x + "</url>"
         rows = [u(f"{base}/index.html")] + [u(f"{base}/c/{s}.html") for s in self.cats]
         for a in self.arts:
-            if a.is_embed: continue
+            if a.is_embed or a.slug in skip: continue
             mod = a.updated or a.date
             rows.append(u(f"{base}/a/{a.slug}.html", mod, getattr(a, "image_raw", None)))
             rows += [u(f"{base}/a/{a.slug}.{l}.html", mod) for l in a.translations]
         return ('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
                 'xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">' + "".join(rows) + "</urlset>")
 
-    def news_sitemap(self):
+    def news_sitemap(self, skip=()):
         base = self.cfg["base_url"].rstrip("/")
         if not base or not self.cfg["seo"].get("news_sitemap"):
             return None
@@ -1225,7 +1263,7 @@ class Site:
             f"<url><loc>{esc(base)}/a/{esc(a.slug)}.html</loc><news:news><news:publication><news:name>{esc(self.cfg['site_name'])}</news:name>"
             f"<news:language>{esc(self.cfg['language'][:2])}</news:language></news:publication>"
             f"<news:publication_date>{a.date.strftime('%Y-%m-%dT%H:%M:%S+00:00')}</news:publication_date><news:title>{esc(a.title)}</news:title></news:news></url>"
-            for a in self.arts if not a.is_embed and a.date >= cutoff)
+            for a in self.arts if not a.is_embed and a.date >= cutoff and a.slug not in skip)
         return ('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
                 'xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">' + rows + "</urlset>")
 
@@ -1242,32 +1280,40 @@ class Site:
 
 
 # --------------------------------------------------------------------------- main
-def main():
-    now = datetime.now(timezone.utc)
-    cfg = load_config()
-    apply_db_settings(cfg)
-    arts, skipped = load_articles(cfg, now)
-    site = Site(cfg, arts, now)
+def view_for(arts, partners, viewer):
+    """The articles one copy of the site shows. A labelled article belongs to its partner: everywhere else it is
+    redirected to the partner's website, or left out altogether when the partner is set to "hide"."""
+    pm = {p["slug"]: p for p in partners}
+    keep, red = [], {}
+    for a in arts:
+        p = pm.get(a.label)
+        mode = (a.pmode or (p or {}).get("main") or "redirect") if p else ""
+        if p and a.label != viewer and mode != "show":          # "show" = it belongs to the partner but also appears everywhere
+            if mode == "hide":
+                continue
+            red[a.slug] = p["url"].replace("{slug}", a.slug).replace("{id}", str(a.id))
+        keep.append(a)
+    return keep, red
 
-    if OUT.exists():
-        shutil.rmtree(OUT)
-    (OUT / "a").mkdir(parents=True)
-    (OUT / "c").mkdir()
-    shutil.copytree(ASSETS_DIR, OUT / "assets")
+
+def write_site(site, arts, redirects, out, with_editor, cfg):
+    (out / "a").mkdir(parents=True)
+    (out / "c").mkdir()
+    shutil.copytree(ASSETS_DIR, out / "assets")
     img_dir = ARTICLES_DIR / "images"
     if img_dir.exists():
-        shutil.copytree(img_dir, OUT / "images")
+        shutil.copytree(img_dir, out / "images")
 
     def w(p, s):
         if not p.startswith("editor/") and p.endswith((".html", ".json", ".xml")):
             s = site.redact(s)
-        (OUT / p).write_text(s, encoding="utf-8")
+        (out / p).write_text(s, encoding="utf-8")
     ed = ROOT / "editor" / "index.html"
-    if ed.exists():
-        (OUT / "editor").mkdir()
+    if with_editor and ed.exists():
+        (out / "editor").mkdir()
         url, key = db_settings(cfg)
         site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
-                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls")
+                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners")
         conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys},
                            "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
@@ -1275,20 +1321,26 @@ def main():
         w("editor/index.html", page)
     w("index.html", site.home())
     w("search.html", site.search_page())
-    (OUT / "privacy").mkdir()
+    (out / "privacy").mkdir()
     w("privacy/index.html", site.privacy_page())
     w("robots.txt", site.robots())
-    (OUT / "settings").mkdir()
+    (out / "settings").mkdir()
     w("settings/index.html", site.settings_page())
     if site.nl_on():
-        (OUT / "newsletter").mkdir()
+        (out / "newsletter").mkdir()
         w("newsletter/index.html", site.newsletter_page())
     if site.live_on():
-        (OUT / "live").mkdir()
+        (out / "live").mkdir()
         w("live/index.html", site.live_page())
     for slug, c in site.cats.items():
         w(f"c/{slug}.html", site.category(slug, c))
     for a in arts:
+        if a.slug in redirects:
+            who = (site.partner(a.label) or {}).get("name", "the partner site")
+            w(f"a/{a.slug}.html", site.redirect_page(redirects[a.slug], who))
+            for lang in a.translations:
+                w(f"a/{a.slug}.{lang}.html", site.redirect_page(redirects[a.slug], who))
+            continue
         w(f"a/{a.slug}.html", site.article(a))
         if a.is_embed:
             w(f"a/{a.slug}-embed.html", site.embed_page(a))
@@ -1298,19 +1350,39 @@ def main():
         "t": a.title, "s": a.subtitle, "c": a.category, "d": a.date.isoformat(), "df": fmt_date(a.date),
         "e": a.excerpt, "u": f"a/{a.slug}.html",
         "x": (strip_tags(a.body_html)[:3000] if not a.is_embed else "") + " " + " ".join(
-            (v.get("title") or "") + " " + (v.get("subtitle") or "") for v in a.translations.values())} for a in arts], ensure_ascii=False))
+            (v.get("title") or "") + " " + (v.get("subtitle") or "") for v in a.translations.values())} for a in arts if a.slug not in redirects], ensure_ascii=False))
     w("feed.xml", site.feed())
-    sm = site.sitemap()
+    sm = site.sitemap(skip=redirects)
     if sm:
         w("sitemap.xml", sm)
-    ns = site.news_sitemap()
+    ns = site.news_sitemap(skip=redirects)
     if ns:
         w("news-sitemap.xml", ns)
     w(".nojekyll", "")
     w("404.html", site.page("Page not found",
                             '<div class="wrap empty"><h1>Page not found</h1><p>Try the menu above or search.</p></div>', ""))
 
-    print(f"Built {len(arts)} articles in {len(site.cats)} sections -> {OUT}")
+
+def main():
+    now = datetime.now(timezone.utc)
+    cfg = load_config()
+    apply_db_settings(cfg)
+    arts, skipped = load_articles(cfg, now)
+    partners = cfg.get("partners", [])
+    if OUT.exists():
+        shutil.rmtree(OUT)
+    keep, red = view_for(arts, partners, None)
+    site = Site(cfg, keep, now)
+    write_site(site, keep, red, OUT, True, cfg)
+    base = cfg["base_url"].rstrip("/")
+    for p in partners:                      # one full copy of the site per partner, under /p/<label>/
+        c2 = copy.deepcopy(cfg)
+        c2.update(site_name=p["name"], logo_left=p["name"], logo_right="", _embed=p["slug"], base_url=f"{base}/p/{p['slug']}" if base else "")
+        c2["seo"].update(indexing=False, news_sitemap=False)
+        keep2, red2 = view_for(arts, partners, p["slug"])
+        write_site(Site(c2, keep2, now), keep2, red2, OUT / "p" / p["slug"], False, c2)
+        print(f"Partner embed '{p['slug']}': {len(keep2)} articles -> {OUT / 'p' / p['slug']}")
+    print(f"Built {len(keep)} articles in {len(site.cats)} sections -> {OUT}")
     sk = ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in skipped.items() if v)
     if sk:
         print(f"Skipped: {sk}")

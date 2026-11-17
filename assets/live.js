@@ -94,11 +94,21 @@
   }
 
   function paint(list) {
-    var prev = rows; rows = {};
-    (list || []).forEach(function (r) { if (r && (r.kind === 'tv' || r.kind === 'radio')) rows[r.kind] = r; });
+    var prev = rows, away = {}; rows = {};
+    (list || []).forEach(function (r) {
+      if (!r || (r.kind !== 'tv' && r.kind !== 'radio')) return;
+      var info = r.label && r.label !== conf.embed && conf.labels && conf.labels[r.label];
+      if (info) { if (info.main !== 'hide') away[r.kind] = info; return; }      /* a partner's broadcast: not played here */
+      rows[r.kind] = r;
+    });
     KINDS.forEach(function (k) {
       if (prev[k] && !rows[k] && rooms[k]) { stop(k, true); setMsg(k, 'The broadcast has ended. Thanks for listening.'); }
       ui(k);
+      if (away[k]) {
+        var m = q(k, '.lmsg'); m.textContent = 'Live now on ' + away[k].name + '. ';
+        var a = document.createElement('a'); a.href = away[k].url.replace('{slug}', '').replace('{id}', ''); a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Watch or listen there';
+        m.appendChild(a);
+      }
     });
   }
 

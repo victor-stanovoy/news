@@ -15,18 +15,22 @@ revoke all on public.live_channels from anon, authenticated;
 
 -- What visitors may see: a channel counts as live only while its editor's page keeps sending a heartbeat,
 -- so closing the browser or losing the connection takes it off air by itself within 90 seconds.
-create or replace view public.live_now as
+drop view if exists public.live_now;
+create view public.live_now as
   select kind, title, started_at from public.live_channels
   where on_air and heartbeat > now() - interval '90 seconds';
 grant select on public.live_now to anon, authenticated;
 
-create or replace function public.live_set(p_kind text, p_title text, p_on boolean)
+alter table public.live_channels add column if not exists label text;
+drop function if exists public.live_set(text, text, boolean);
+create or replace function public.live_set(p_kind text, p_title text, p_on boolean, p_label text default null)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   if public.editor_role() not in ('admin', 'editor') then raise exception 'Only editors and admins can go live'; end if;
   if p_kind not in ('radio', 'tv') then raise exception 'Unknown channel'; end if;
   update public.live_channels set
     on_air = p_on, title = case when p_on then nullif(trim(p_title), '') else title end,
+    label = case when p_on then nullif(trim(p_label), '') else label end,
     started_at = case when p_on then now() else started_at end,
     heartbeat = case when p_on then now() else heartbeat end,
     started_by = case when p_on then auth.uid() else started_by end
@@ -40,13 +44,14 @@ begin
   update public.live_channels set heartbeat = now() where kind = p_kind and on_air and started_by = auth.uid();
 end $$;
 
-revoke execute on function public.live_set(text, text, boolean), public.live_beat(text) from public, anon;
-grant execute on function public.live_set(text, text, boolean), public.live_beat(text) to authenticated;
+revoke execute on function public.live_set(text, text, boolean, text), public.live_beat(text) from public, anon;
+grant execute on function public.live_set(text, text, boolean, text), public.live_beat(text) to authenticated;
 
 -- "Now playing" line shown to listeners (song title and credit), set by the studio while on air
 alter table public.live_channels add column if not exists now_playing text;
-create or replace view public.live_now as
-  select kind, title, started_at, now_playing from public.live_channels
+drop view if exists public.live_now;
+create view public.live_now as
+  select kind, title, started_at, now_playing, label from public.live_channels
   where on_air and heartbeat > now() - interval '90 seconds';
 grant select on public.live_now to anon, authenticated;
 
