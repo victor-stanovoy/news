@@ -167,6 +167,7 @@
   function signOut() { stopLive('radio'); stopLive('tv'); view = ''; nlRoot = null; nlDirty = false; sb.auth.signOut().then(function () { articles = []; current = null; renderLogin(); }); }
 
   /* ---------------------------------------------------------------- partners: where a story appears */
+  var MAIN_ONLY = '_main';   /* stored as no partner label + partner_mode = 'main' */
   function partnerList() { return (cfg.site && cfg.site.partners) || []; }
   function partnerName(slug) { var p = partnerList().filter(function (x) { return x.slug === slug; })[0]; return p ? p.name : slug; }
   function whereMode(slug, mode) { var p = partnerList().filter(function (x) { return x.slug === slug; })[0]; return mode || (p && p.main) || 'redirect'; }
@@ -177,6 +178,7 @@
   /* one clear choice instead of a label plus a mode */
   function whereSelect(a, onchange) {
     var opts = [h('option', { value: '', text: 'Everywhere: main website and every partner embed' })];
+    opts.push(h('option', { value: MAIN_ONLY, text: 'Only main website (not in any partner embed)' }));
     partnerList().forEach(function (p) {
       opts.push(h('optgroup', { label: p.name },
         h('option', { value: p.slug + ':show', text: 'Main website AND ' + p.name }),
@@ -184,8 +186,8 @@
         h('option', { value: p.slug + ':redirect', text: 'Main website sends readers to ' + p.name })));
     });
     var sel = h('select', { onchange: onchange }, opts);
-    sel.value = a.partner_label ? a.partner_label + ':' + whereMode(a.partner_label, a.partner_mode) : '';
-    if (sel.value !== (a.partner_label ? a.partner_label + ':' + whereMode(a.partner_label, a.partner_mode) : '')) {   /* label of a partner that was removed */
+    sel.value = a.partner_label ? a.partner_label + ':' + whereMode(a.partner_label, a.partner_mode) : (a.partner_mode === 'main' ? MAIN_ONLY : '');
+    if (a.partner_label && sel.value !== a.partner_label + ':' + whereMode(a.partner_label, a.partner_mode)) {   /* label of a partner that was removed */
       sel.appendChild(h('option', { value: a.partner_label + ':' + whereMode(a.partner_label, a.partner_mode), text: 'Removed partner: ' + a.partner_label }));
       sel.value = a.partner_label + ':' + whereMode(a.partner_label, a.partner_mode);
     }
@@ -378,7 +380,7 @@
     listEl.replaceChildren.apply(listEl, rows.map(function (a) {
       return h('button', { class: 'item' + (current && current.id === a.id ? ' on' : ''), type: 'button', onclick: function () { guard(function () { location.hash = '#/edit/' + a.id; }); } },
         h('b', { text: a.title || '(untitled)' }),
-        h('span', {}, h('i', { class: 'badge ' + a.status, text: a.taken_down ? 'taken down' : a.status }), a.partner_label ? h('i', { class: 'badge ptag', title: 'Partner label', text: whereShort(a.partner_label, a.partner_mode) }) : null, (a.category || '') + ' · ' + fmtDate(a.updated_at)));
+        h('span', {}, h('i', { class: 'badge ' + a.status, text: a.taken_down ? 'taken down' : a.status }), a.partner_label ? h('i', { class: 'badge ptag', title: 'Partner label', text: whereShort(a.partner_label, a.partner_mode) }) : (a.partner_mode === 'main' ? h('i', { class: 'badge ptag', title: 'Not shown in partner embeds', text: 'main site only' }) : null), (a.category || '') + ' · ' + fmtDate(a.updated_at)));
     }));
   }
 
@@ -1630,7 +1632,7 @@
       h('div', { class: 'cols' },
         h('div', {}, h('div', { class: 'panel' }, f.title, f.subtitle), h('div', { class: 'panel' }, bodyBox)),
         h('div', {},
-          h('div', { class: 'panel' }, h('h3', { text: 'Publishing' }), field('Status', f.status, canPublish() ? '' : 'Writers save drafts. An editor will publish them.'), schedField, pubField, (partnerList().length || a.partner_label) ? field('Where it appears', f.where, 'Pick a partner to share this story with their embed, or to keep it out of the main website.') : null, tk.box, ft.box, br.box, f.breakingText),
+          h('div', { class: 'panel' }, h('h3', { text: 'Publishing' }), field('Status', f.status, canPublish() ? '' : 'Writers save drafts. An editor will publish them.'), schedField, pubField, (partnerList().length || a.partner_label || a.partner_mode === 'main') ? field('Where it appears', f.where, 'Pick a partner to share this story with their embed, or to keep it out of the main website.') : null, tk.box, ft.box, br.box, f.breakingText),
           h('div', { class: 'panel' }, h('h3', { text: 'Details' }), field('Section', f.category), catList, field('Author', f.author), av.box),
           h('div', { class: 'panel' }, h('h3', { text: 'Cover image' }), prev, field('Image address', f.image),
             h('div', { class: 'up' }, h('button', { class: 'btn', type: 'button', text: 'Upload image', onclick: function () { pickImage(function (u) { f.image.value = u; mark(); showCover(); }); } })),
@@ -1668,7 +1670,10 @@
         if (o.title || o.content) tr[l] = o;
       });
       d.translations = tr;
-      if (f.where.value || a.partner_label) { var wv = f.where.value.split(':'); d.partner_label = wv[0] || null; d.partner_mode = wv[0] ? wv[1] : null; }   /* only touched when used, so it works before partners.sql is run */   /* only touched when used, so it works before partners.sql is run */
+      if (f.where.value || a.partner_label || a.partner_mode === 'main') {
+        if (f.where.value === MAIN_ONLY) { d.partner_label = null; d.partner_mode = 'main'; }
+        else { var wv = f.where.value.split(':'); d.partner_label = wv[0] || null; d.partner_mode = wv[0] ? wv[1] : null; }
+      }   /* only touched when used, so it works before partners.sql is run */
       if (me.role === 'admin') {
         d.content_type = f.contentType.value;
         d.content = f.rawHtml ? f.rawHtml.value : (quill && quill.getLength() > 1 ? quill.root.innerHTML : '');
