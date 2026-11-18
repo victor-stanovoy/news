@@ -839,7 +839,7 @@ class Site:
         if not seo.get("indexing"):
             return "User-agent: *\nDisallow: /\n"
         pre = urlsplit(base).path.rstrip("/") if base else ""      # a site at example.com/news keeps its pages under /news
-        out = f"User-agent: *\nAllow: /\nDisallow: {pre}/editor/\nDisallow: {pre}/settings/\nDisallow: {pre}/search.html\nDisallow: {pre}/p/\nDisallow: {pre}/*-embed.html\n"
+        out = f"User-agent: *\nAllow: /\nDisallow: {pre}/editor/\nDisallow: {pre}/settings/\nDisallow: {pre}/badge/\nDisallow: {pre}/search.html\nDisallow: {pre}/p/\nDisallow: {pre}/*-embed.html\n"
         out += "".join(f"Disallow: {pre}{x}\n" for x in seo.get("disallow", []) if isinstance(x, str) and x.startswith("/"))
         if seo.get("block_ai_crawlers"):
             for bot in ("GPTBot", "ChatGPT-User", "OAI-SearchBot", "CCBot", "ClaudeBot", "anthropic-ai", "Google-Extended", "PerplexityBot",
@@ -871,6 +871,14 @@ class Site:
         who = f'<p>Questions about your data, or want your newsletter record deleted? Write to <a href="mailto:{esc(cfg["privacy"]["contact"])}">{esc(cfg["privacy"]["contact"])}</a>.</p>' if cfg["privacy"].get("contact") else ""
         body = f'<div class="wrap prefspage"><h1>Privacy</h1><p class="lead">What {esc(cfg["site_name"])} stores about you, in plain words.</p><ul class="privlist">{"".join(li)}</ul>{who}</div>'
         return self.page("Privacy", body, "../")
+
+    def badge_page(self):
+        url, key = db_settings(self.cfg)
+        data = json.dumps({"url": url, "key": key, "site": self.cfg["site_name"]}, ensure_ascii=False).replace("</", "<\\/")
+        body = (f'<div class="wrap badgepage"><div id="badge-out" class="bcheck">Checking badge…</div>'
+                f'<script type="application/json" id="badge-data">{data}</script>'
+                f'<script src="../assets/badge.js?v={asset_ver("badge.js")}" defer></script></div>')
+        return self.page("Staff badge check", body, "../")
 
     def polls_on(self):
         return not self.locked() and bool(self.cfg.get("polls", {}).get("enabled")) and bool(db_settings(self.cfg)[0])
@@ -1357,7 +1365,7 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
         site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
                      "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners")
         conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys},
-                           "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
+                           "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
                 .replace("{{CSS_VER}}", asset_ver("editor.css")).replace("{{JS_VER}}", asset_ver("editor.js")))
         w("editor/index.html", page)
@@ -1368,6 +1376,9 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     w("robots.txt", site.robots())
     (out / "settings").mkdir()
     w("settings/index.html", site.settings_page())
+    if not site.embed and not site.locked() and db_settings(cfg)[0]:
+        (out / "badge").mkdir()
+        w("badge/index.html", site.badge_page())
     if site.nl_on():
         (out / "newsletter").mkdir()
         w("newsletter/index.html", site.newsletter_page())

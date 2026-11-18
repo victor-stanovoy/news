@@ -307,3 +307,12 @@ Repository **Settings → Pages → Build and deployment → Source: GitHub Acti
 * `404.html` is a small catch-the-404s game (arrow keys, A/D or drag on a phone). GitHub Pages serves it automatically for unknown addresses.
 * Each partner in **Settings > Partners** can have a **logo** (paste an https address or upload an image). It replaces the site name in the header of that partner's embed.
 * In the article editor, **Where it appears** is one drop-down: everywhere, main site and a partner, only in a partner (hidden on the main site), or main site sends readers to the partner. No new Supabase steps are needed.
+
+## Staff ID badges
+
+Admins get a **Badges** tab. Add a person (name, job title, employee ID, optional photo) and you get a credit-card-size badge with a QR code.
+
+* **Copy QR code** puts the QR image on the clipboard to paste into your label or design software; **Download QR** saves a PNG; **Copy link** copies the address inside the QR.
+* **Print this badge** / **Print all** open the print dialog with 85.6 × 54 mm cards, two per row.
+* Scanning the QR opens `/badge/` on your website, which shows the person's name, title, ID and photo and says the badge is valid. **Switch off** makes a lost badge stop verifying; **New link** replaces the secret code.
+* One-time setup: run `supabase/badges.sql` in the Supabase SQL Editor. The page is not built in GDPR lockdown mode.

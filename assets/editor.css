@@ -233,3 +233,28 @@ body.focusing{overflow:hidden}
 .tvmore{margin:12px 0}
 @media (max-width:640px){.pads{grid-template-columns:repeat(2,1fr)}}
 .badge.ptag{background:var(--accent);color:#fff;border-color:var(--accent);margin-left:4px}
+
+/* ---- staff badges ---- */
+.badges .blist{display:grid;gap:22px;margin-top:16px}
+.badges .brow{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
+.badges .bact{display:flex;flex-wrap:wrap;gap:8px;max-width:420px;align-items:flex-start}
+.badges .bact .hint{flex-basis:100%;word-break:break-all;opacity:.7}
+.bcard{width:85.6mm;height:54mm;box-sizing:border-box;background:#fff;color:#111;border:1px solid #cfd2dc;display:flex;flex-direction:column;overflow:hidden;font-family:Inter,system-ui,sans-serif;break-inside:avoid}
+.bcard.off{opacity:.45}
+.bcard .bhead{background:#12104a;color:#fff;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:3.2mm;padding:2mm 4mm}
+.bcard .bbody{flex:1;display:flex;align-items:center;gap:3.5mm;padding:3mm 4mm}
+.bcard .bphoto{width:20mm;height:24mm;object-fit:cover;background:#e8e9f0;flex:none}
+.bcard .bphoto.ini{display:flex;align-items:center;justify-content:center;font-size:7mm;font-weight:700;color:#12104a}
+.bcard .binfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:1mm}
+.bcard .bname{font-size:4.4mm;line-height:1.15}
+.bcard .brole{font-size:3.2mm;color:#444}
+.bcard .bno{font-size:3.2mm;font-weight:700;color:#e8003d}
+.bcard .bqr{width:22mm;height:22mm;flex:none;image-rendering:pixelated}
+.bcard .bfoot{font-size:2.6mm;text-align:right;padding:0 4mm 2mm;color:#666}
+.bsheet{display:none}
+@media print{
+  body.printing-badges>*:not(.bsheet){display:none!important}
+  body.printing-badges .bsheet{display:grid;grid-template-columns:repeat(2,85.6mm);gap:6mm;padding:0}
+  body.printing-badges{background:#fff!important}
+  @page{margin:10mm}
+}

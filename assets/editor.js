@@ -244,7 +244,7 @@
       h('button', { class: 'lnk', type: 'button', text: 'Password', onclick: function () { guard(function () { renderPassword(false); }); } }),
       h('button', { class: 'lnk', type: 'button', text: 'Sign out', onclick: function () { guard(signOut); } }));
 
-    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['newsletter', 'Newsletter', '#/newsletter'], ['polls', 'Polls', '#/polls']] : [], me.role === 'admin' ? [['settings', 'Settings', '#/settings']] : []);
+    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['newsletter', 'Newsletter', '#/newsletter'], ['polls', 'Polls', '#/polls']] : [], me.role === 'admin' ? [['badges', 'Badges', '#/badges'], ['settings', 'Settings', '#/settings']] : []);
     tabsEl = h('nav', { class: 'tabs', 'aria-label': 'Workspaces' }, windows.map(function (w) {
       return h('button', { class: 'tab', type: 'button', 'data-v': w[0], onclick: function () { guard(function () { if (location.hash === w[2] || (w[0] === 'articles' && !location.hash)) route(); else location.hash = w[2]; }); } },
         w[1], w[0] === 'radio' || w[0] === 'tv' ? h('i', { class: 'dot', title: 'On air' }) : null);
@@ -395,6 +395,17 @@
       if (dashCleanup) { dashCleanup(); dashCleanup = null; }
       current = null; dirty = false; view = 'settings';
       stage.replaceChildren(showSettings()); paintTabs(); return;
+    }
+    if (location.hash === '#/badges') {
+      if (me.role !== 'admin') { location.hash = ''; return; }
+      if (dashCleanup) { dashCleanup(); dashCleanup = null; }
+      current = null; dirty = false; view = 'badges';
+      stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'empty', text: 'Loading…' }))); paintTabs();
+      Promise.all([loadScript('../assets/vendor/qrcode.js'), loadScript('../assets/badges-editor.js?v=' + ((cfg.ver || {}).badges || ''))]).then(function () {
+        if (view !== 'badges') return;
+        stage.replaceChildren(window.SparkBadges.mount({ h: h, field: field, check: check, toast: toast, sb: sb, errText: errText, upload: upload, site: cfg.site }));
+      }).catch(function (e) { stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'msg err', text: errText(e) }))); });
+      return;
     }
     if (location.hash === '#/polls') {
       if (!canPublish()) { location.hash = ''; return; }

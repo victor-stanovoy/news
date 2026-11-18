@@ -494,3 +494,11 @@ body.poll-open{overflow:hidden}
   .catband .grid4>*{flex:0 0 72%;scroll-snap-align:start}
 }
 @media (max-width:520px){.two .grid3{grid-template-columns:1fr}.two .grid3>*:first-child{grid-column:auto}}
+
+/* ---- staff badge check page ---- */
+.badgepage{max-width:520px;padding:48px 16px;text-align:center}
+.bcheck{border:2px solid #cfd2dc;padding:28px 20px}
+.bcheck.ok{border-color:#1a9c5b}.bcheck.bad{border-color:#e8003d}
+.bcheck img{width:140px;height:170px;object-fit:cover;display:block;margin:0 auto 14px}
+.bcheck .tick{color:#1a9c5b;font-weight:700;margin:0 0 8px}.bcheck.bad{color:#e8003d;font-weight:600}
+.bcheck .nm{margin:0 0 4px}.bcheck .rl{margin:0;color:#555}.bcheck .no{margin:8px 0 0;font-weight:700}
