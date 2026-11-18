@@ -166,10 +166,37 @@
   }
   function signOut() { stopLive('radio'); stopLive('tv'); view = ''; nlRoot = null; nlDirty = false; sb.auth.signOut().then(function () { articles = []; current = null; renderLogin(); }); }
 
+  /* ---------------------------------------------------------------- partners: where a story appears */
+  function partnerList() { return (cfg.site && cfg.site.partners) || []; }
+  function partnerName(slug) { var p = partnerList().filter(function (x) { return x.slug === slug; })[0]; return p ? p.name : slug; }
+  function whereMode(slug, mode) { var p = partnerList().filter(function (x) { return x.slug === slug; })[0]; return mode || (p && p.main) || 'redirect'; }
+  function whereShort(slug, mode) {
+    var m = whereMode(slug, mode), n = partnerName(slug);
+    return m === 'show' ? 'here + ' + n : m === 'hide' ? 'only ' + n : '\u2192 ' + n;
+  }
+  /* one clear choice instead of a label plus a mode */
+  function whereSelect(a, onchange) {
+    var opts = [h('option', { value: '', text: 'Everywhere: main website and every partner embed' })];
+    partnerList().forEach(function (p) {
+      opts.push(h('optgroup', { label: p.name },
+        h('option', { value: p.slug + ':show', text: 'Main website AND ' + p.name }),
+        h('option', { value: p.slug + ':hide', text: 'Only in ' + p.name + ' (hidden on the main website)' }),
+        h('option', { value: p.slug + ':redirect', text: 'Main website sends readers to ' + p.name })));
+    });
+    var sel = h('select', { onchange: onchange }, opts);
+    sel.value = a.partner_label ? a.partner_label + ':' + whereMode(a.partner_label, a.partner_mode) : '';
+    if (sel.value !== (a.partner_label ? a.partner_label + ':' + whereMode(a.partner_label, a.partner_mode) : '')) {   /* label of a partner that was removed */
+      sel.appendChild(h('option', { value: a.partner_label + ':' + whereMode(a.partner_label, a.partner_mode), text: 'Removed partner: ' + a.partner_label }));
+      sel.value = a.partner_label + ':' + whereMode(a.partner_label, a.partner_mode);
+    }
+    return sel;
+  }
+
   /* ---------------------------------------------------------------- data */
   function loadArticles() {
-    return sb.from('articles').select('id,slug,title,category,status,published_at,scheduled_publish_at,updated_at,created_by,taken_down,author_name')
-      .order('updated_at', { ascending: false }).limit(2000)
+    var cols = 'id,slug,title,category,status,published_at,scheduled_publish_at,updated_at,created_by,taken_down,author_name';
+    function q(c) { return sb.from('articles').select(c).order('updated_at', { ascending: false }).limit(2000); }
+    return q(cols + ',partner_label,partner_mode').then(function (r) { return r.error ? q(cols) : r; })
       .then(function (r) { if (r.error) toast(r.error.message, true); articles = r.data || []; });
   }
 
@@ -351,7 +378,7 @@
     listEl.replaceChildren.apply(listEl, rows.map(function (a) {
       return h('button', { class: 'item' + (current && current.id === a.id ? ' on' : ''), type: 'button', onclick: function () { guard(function () { location.hash = '#/edit/' + a.id; }); } },
         h('b', { text: a.title || '(untitled)' }),
-        h('span', {}, h('i', { class: 'badge ' + a.status, text: a.taken_down ? 'taken down' : a.status }), (a.category || '') + ' · ' + fmtDate(a.updated_at)));
+        h('span', {}, h('i', { class: 'badge ' + a.status, text: a.taken_down ? 'taken down' : a.status }), a.partner_label ? h('i', { class: 'badge ptag', title: 'Partner label', text: whereShort(a.partner_label, a.partner_mode) }) : null, (a.category || '') + ' · ' + fmtDate(a.updated_at)));
     }));
   }
 
@@ -972,7 +999,7 @@
     var isTv = kind === 'tv', S = loadSet(kind), stops = [];
     var save = function () { saveSet(kind, S); };
     var parts = (cfg.site && cfg.site.partners) || [];
-    var partnerSel = parts.length ? h('select', { onchange: function () { S.label = partnerSel.value; save(); } }, h('option', { value: '', text: 'None' }), parts.map(function (p) { return h('option', { value: p.slug, text: p.name + ' (' + p.slug + ')' }); })) : null;
+    var partnerSel = parts.length ? h('select', { onchange: function () { S.label = partnerSel.value; save(); } }, h('option', { value: '', text: 'Everywhere: main website and every partner embed' }), parts.map(function (p) { return h('option', { value: p.slug, text: 'Belongs to ' + p.name + ' (others see a link to it)' }); })) : null;
     if (partnerSel) partnerSel.value = S.label || '';
     var title = h('input', { type: 'text', value: S.title || '', placeholder: isTv ? 'e.g. Evening news' : 'e.g. Morning bulletin', maxlength: '120', oninput: function () { S.title = title.value; save(); } });
     var mic = h('select', { onchange: function () { S.mic = mic.value; save(); } }, h('option', { value: '', text: 'Default microphone' }));
@@ -1114,7 +1141,7 @@
       h('div', { class: 'dashhead' }, h('h2', { text: isTv ? 'TV studio' : 'Radio studio' }), badge, timer),
       h('div', { class: 'dashgrid' },
         h('section', { class: 'panel' }, h('h3', { text: 'Broadcast' }),
-          field('Title shown to visitors', title), partnerSel ? field('Partner label', partnerSel, 'Optional. Visitors of other sites are sent to the partner\u2019s website for this broadcast.') : null, source ? field('Source', source) : null,
+          field('Title shown to visitors', title), partnerSel ? field('Where it plays', partnerSel, 'Visitors outside that partner see \u201cLive now on \u2026\u201d with a link instead of the player.') : null, source ? field('Source', source) : null,
           preview, h('div', { class: 'metrow' }, h('span', { text: 'Mic level' }), meter), status, h('div', { class: 'btnrow' }, go, test)),
         h('section', { class: 'panel' }, h('h3', { text: 'Settings (saved in this browser)' }),
           field('Microphone', mic), camField, res ? field('Video quality', res) : null,
@@ -1181,11 +1208,20 @@
         var ur = h('input', { type: 'url', maxlength: '300', value: p.url || '', placeholder: 'empty = hosted here, or https://partner.com/news/{slug}', 'aria-label': 'Partner website address', oninput: function () { p.url = ur.value.trim(); } });
         var mn = h('select', { 'aria-label': 'On the main site' }, h('option', { value: 'redirect', text: 'Send visitors to the partner (their copy or website)' }), h('option', { value: 'hide', text: 'Show only in the partner embed (hide everywhere else)' }));
         mn.value = p.main === 'hide' ? 'hide' : 'redirect'; mn.addEventListener('change', function () { p.main = mn.value; });
+        var lg = h('input', { type: 'url', maxlength: '400', value: p.logo || '', placeholder: 'https://\u2026/logo.png', 'aria-label': 'Logo address', oninput: function () { p.logo = lg.value.trim(); preview(); } });
+        var pv = h('img', { class: 'plogo-prev', alt: '', style: 'max-height:44px;max-width:180px;display:none' });
+        function preview() { if (lg.value) { pv.src = lg.value; pv.style.display = ''; } else pv.style.display = 'none'; }
+        var file = h('input', { type: 'file', accept: 'image/*', style: 'display:none', onchange: function () {
+          var f = file.files && file.files[0]; if (!f) return;
+          upload(f).then(function (u) { p.logo = u; lg.value = u; preview(); toast('Logo uploaded. Save settings to keep it.'); }, function (e) { toast(errText(e), true); });
+        } });
+        preview();
         var ac = h('input', { type: 'text', maxlength: '7', value: p.accent || '', placeholder: '#1a73e8', 'aria-label': 'Accent colour', oninput: function () { p.accent = ac.value.trim(); } });
         return h('div', { class: 'partner', 'data-i': String(i) },
           h('div', { class: 'row2' }, field('Website name in the embed', nm), field('Label (letters, numbers, dashes)', sl)),
           field('Partner\u2019s own website address (optional)', ur, 'Leave empty if the partner lives on this website: stories then go to their copy at the embed link below. Otherwise use {slug} for the story name.'),
           h('div', { class: 'row2' }, field('Labelled stories and broadcasts', mn), field('Accent colour (optional)', ac)),
+          field('Logo (replaces the name in the header; transparent PNG or SVG works best)', h('div', { class: 'uprow' }, lg, h('button', { class: 'btn', type: 'button', text: 'Upload logo', onclick: function () { file.click(); } }), file, pv)),
           h('p', { class: 'hint', text: 'Embed link: ' + embed }),
           h('div', { class: 'btnrow' }, copy, h('button', { class: 'btn danger', type: 'button', text: 'Remove', onclick: function () { V.partners.splice(i, 1); draw(); } })));
       }));
@@ -1193,7 +1229,7 @@
     draw();
     return h('section', { class: 'panel' }, h('h3', { text: 'Partners and embeds' }),
       h('p', { class: 'hint', text: 'Each partner gets a full copy of this website (articles, Live, polls, newsletter, search) under its own name that they can embed in an iframe. Put the partner\u2019s label on a story or a broadcast to send it to them. Save settings, then wait for the website to update.' }),
-      list, h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Add partner', onclick: function () { V.partners.push({ name: '', slug: '', url: '', main: 'redirect', accent: '' }); draw(); } })));
+      list, h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Add partner', onclick: function () { V.partners.push({ name: '', slug: '', url: '', main: 'redirect', accent: '', logo: '' }); draw(); } })));
   }
 
   function showSettings() {
@@ -1541,12 +1577,7 @@
     f.citations = h('textarea', { class: 'code', placeholder: 'Sources and credits. Separate entries with a blank line.', oninput: mark }); f.citations.value = a.citations || '';
     f.seriesId = h('input', { type: 'text', value: a.series_id || '', oninput: mark }); f.seriesOrder = h('input', { type: 'number', value: a.series_order == null ? '' : a.series_order, oninput: mark });
     var aiT = check('Translations were made automatically', a.is_ai_translated, mark); f.aiTr = aiT.input;
-    f.label = h('select', { onchange: mark }, h('option', { value: '', text: 'None: a normal article' }),
-      ((cfg.site && cfg.site.partners) || []).map(function (p) { return h('option', { value: p.slug, text: p.name + ' (' + p.slug + ')' }); }));
-    f.label.value = a.partner_label || '';
-    f.pmode = h('select', { onchange: mark }, h('option', { value: '', text: 'Partner default' }), h('option', { value: 'show', text: 'Show in both: here and in the partner embed' }),
-      h('option', { value: 'redirect', text: 'Send visitors here to the partner' }), h('option', { value: 'hide', text: 'Only in the partner embed (hidden here)' }));
-    f.pmode.value = a.partner_mode || '';
+    f.where = whereSelect(a, mark);
 
     /* live updates */
     var liveRows = h('div');
@@ -1588,7 +1619,7 @@
       h('div', { class: 'cols' },
         h('div', {}, h('div', { class: 'panel' }, f.title, f.subtitle), h('div', { class: 'panel' }, bodyBox)),
         h('div', {},
-          h('div', { class: 'panel' }, h('h3', { text: 'Publishing' }), field('Status', f.status, canPublish() ? '' : 'Writers save drafts. An editor will publish them.'), schedField, pubField, tk.box, ft.box, br.box, f.breakingText),
+          h('div', { class: 'panel' }, h('h3', { text: 'Publishing' }), field('Status', f.status, canPublish() ? '' : 'Writers save drafts. An editor will publish them.'), schedField, pubField, (partnerList().length || a.partner_label) ? field('Where it appears', f.where, 'Pick a partner to share this story with their embed, or to keep it out of the main website.') : null, tk.box, ft.box, br.box, f.breakingText),
           h('div', { class: 'panel' }, h('h3', { text: 'Details' }), field('Section', f.category), catList, field('Author', f.author), av.box),
           h('div', { class: 'panel' }, h('h3', { text: 'Cover image' }), prev, field('Image address', f.image),
             h('div', { class: 'up' }, h('button', { class: 'btn', type: 'button', text: 'Upload image', onclick: function () { pickImage(function (u) { f.image.value = u; mark(); showCover(); }); } })),
@@ -1597,8 +1628,6 @@
             field('Article type', f.contentType), field('Extra images', f.extra),
             h('div', { class: 'up', style: 'margin:-6px 0 12px' }, h('button', { class: 'btn', type: 'button', text: 'Upload & add', onclick: function () { pickImage(function (u) { f.extra.value = (f.extra.value.trim() ? f.extra.value.trim() + '\n' : '') + u; mark(); }); } })),
             field('Extra images layout', f.layout), field('Video', f.video), field('Sources & credits', f.citations),
-            ((cfg.site && cfg.site.partners || []).length || a.partner_label) ? field('Partner label', f.label, 'The partner\u2019s embed always shows this story.') : null,
-            ((cfg.site && cfg.site.partners || []).length || a.partner_label) ? field('On this website', f.pmode, 'What visitors of the main site (and other embeds) get for a labelled story.') : null,
             h('div', { class: 'row2' }, field('Series ID', f.seriesId), field('Series order', f.seriesOrder)), live.box, liveBox)),
           h('div', { class: 'panel' }, h('h3', { text: 'Translations' }), aiT.box, trBox, trSel),
           delBtn ? h('div', { class: 'panel' }, delBtn) : null)));
@@ -1628,7 +1657,7 @@
         if (o.title || o.content) tr[l] = o;
       });
       d.translations = tr;
-      if (f.label.value || a.partner_label) { d.partner_label = f.label.value || null; d.partner_mode = f.label.value ? (f.pmode.value || null) : null; }   /* only touched when used, so it works before partners.sql is run */
+      if (f.where.value || a.partner_label) { var wv = f.where.value.split(':'); d.partner_label = wv[0] || null; d.partner_mode = wv[0] ? wv[1] : null; }   /* only touched when used, so it works before partners.sql is run */   /* only touched when used, so it works before partners.sql is run */
       if (me.role === 'admin') {
         d.content_type = f.contentType.value;
         d.content = f.rawHtml ? f.rawHtml.value : (quill && quill.getLength() > 1 ? quill.root.innerHTML : '');

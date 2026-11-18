@@ -507,7 +507,8 @@ def clean_settings(d):
             acc = str(x.get("accent", "")).strip()
             ps.append({"slug": slug, "name": _str(x.get("name") or slug, 80), "url": url,
                        "main": "hide" if x.get("main") == "hide" else "redirect",
-                       "accent": acc if re.match(r"^#[0-9a-fA-F]{6}$", acc) else ""})
+                       "accent": acc if re.match(r"^#[0-9a-fA-F]{6}$", acc) else "",
+                       "logo": str(x.get("logo", "")).strip()[:400] if re.match(r"^https://[^\s\"'<>]+$", str(x.get("logo", "")).strip()) else ""})
         out["partners"] = ps
     if isinstance(d.get("polls"), dict) and "enabled" in d["polls"]:
         out["polls"] = {"enabled": bool(d["polls"]["enabled"])}
@@ -911,7 +912,11 @@ class Site:
         links = [
             f'<a href="{root}c/{slug}.html"{" class=on aria-current=page" if slug == active else ""}>{esc(c["name"])}</a>'
             for slug, c in self.cats.items()]
-        if cfg["logo_left"]:
+        pl = (self.partner(self.embed) or {}).get("logo") if self.embed else ""
+        if pl:
+            logo = (f'<a class="logo plogo" href="{root}index.html" aria-label="{esc(cfg["site_name"])} home">'
+                    f'<img src="{esc(pl)}" alt="{esc(cfg["site_name"])}" height="44"></a>')
+        elif cfg["logo_left"]:
             tm = "<sup>™</sup>" if "™" in cfg["site_name"] else ""
             logo = (f'<a class="logo" href="{root}index.html" aria-label="{esc(cfg["site_name"])} home">'
                     f'<img class="spark" src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="40" height="40" alt="">'
@@ -1041,6 +1046,8 @@ class Site:
                 banner = (f'<div class="breaking"><div class="wrap"><strong>BREAKING</strong>'
                           f'<a href="{self.url(b, root)}">{esc(b.breaking_text)}</a></div></div>')
 
+        chips = "".join(f'<a href="c/{s}.html">{esc(c["name"])}</a>' for s, c in list(self.cats.items())[:12])
+        chipbar = f'<nav class="wrap chips" aria-label="Sections"><span>Explore</span>{chips}</nav>' if chips else ""
         top = (f'<section class="wrap top-grid"><article class="hero"><a href="{self.url(hero, root)}">'
                f'<div class="thumb">{self.picture(hero, root, lazy=False)}</div>'
                f'<div class="ct"><h2>{esc(hero.title)}</h2><p class="ex">{esc(hero.excerpt)}</p>{self.meta(hero)}</div></a></article>'
@@ -1058,13 +1065,20 @@ class Site:
                f'{"".join(self.card(a, root) for a in latest)}</div></div>'
                f'<aside class="most"><h2 class="sec">{mr_title}</h2><ol>{most}</ol></aside></section>')
 
-        shown = {hero.slug} | {a.slug for a in side} | {a.slug for a in latest}
+        pool = [a for a in rest[13:] if a.image_raw and not a.is_embed] or [a for a in rest[13:] if not a.is_embed]
+        spot = pool[0] if pool else None
+        spotlight = ""
+        if spot:
+            spotlight = (f'<section class="spotlight"><div class="wrap spotin"><a class="spimg" href="{self.url(spot, root)}">{self.picture(spot, root)}</a>'
+                         f'<div class="sptxt"><span class="kicker">Spotlight</span><h2><a href="{self.url(spot, root)}">{esc(spot.title)}</a></h2>'
+                         f'<p>{esc(spot.excerpt)}</p><a class="spmore" href="{self.url(spot, root)}">Read the story &rarr;</a></div></div></section>')
+        shown = {hero.slug} | {a.slug for a in side} | {a.slug for a in latest} | ({spot.slug} if spot else set())
         blocks = ""
         for slug, c in list(self.cats.items())[:cfg["home_category_sections"]]:
             items = [a for a in c["items"] if a.slug not in shown][:4] or c["items"][:4]
-            blocks += (f'<section class="wrap catblock"><h2 class="sec"><a href="c/{slug}.html">{esc(c["name"])} &rsaquo;</a></h2>'
-                       f'<div class="grid4">{"".join(self.card(a, root, "s") for a in items)}</div></section>')
-        return self.page("", banner + top + lat + blocks, root,
+            blocks += (f'<section class="catband"><div class="wrap catblock"><h2 class="sec"><a href="c/{slug}.html">{esc(c["name"])} &rsaquo;</a></h2>'
+                       f'<div class="grid4">{"".join(self.card(a, root, "s") for a in items)}</div></div></section>')
+        return self.page("", banner + top + chipbar + lat + spotlight + blocks, root,
                          desc=cfg["tagline"], image=self.img(hero.image_raw, root), path="index.html")
 
     def category(self, slug, c):
@@ -1233,6 +1247,22 @@ class Site:
                 else h.replace("<meta charset", '<base target="_top"><meta charset', 1)
         return h
 
+    def not_found(self):
+        """The 404 page: GitHub Pages serves it from any address, so every link in it must be absolute."""
+        base = self.cfg["base_url"].rstrip("/")
+        pre = urlsplit(base).path.rstrip("/") if base else ""
+        root = pre + "/"
+        body = (f'<div class="wrap lost"><p class="code" aria-hidden="true">4<span>0</span>4</p>'
+                f'<h1>This page wandered off</h1>'
+                f'<p class="lead">We looked everywhere, even behind the sofa. While you are here, catch some headlines and dodge the 404s.</p>'
+                f'<div class="gamebox"><div class="gscores"><span>Score <b id="gscore">0</b></span><span>Best <b id="gbest">0</b></span></div>'
+                f'<canvas id="game" tabindex="0" width="360" height="480" role="img" aria-label="Game: move the atom left and right to catch headlines and avoid the 404 blocks"></canvas>'
+                f'<p id="gmsg" class="gmsg" role="status"></p><button id="gstart" class="gbtn" type="button">Play</button>'
+                f'<p class="small">Arrow keys or A and D to move. On a phone, drag your finger.</p></div>'
+                f'<p class="lostlinks"><a href="{root}index.html">Home page</a> &middot; <a href="{root}search.html">Search</a></p></div>'
+                f'<script src="{root}assets/404.js?v={asset_ver("404.js")}" defer></script>')
+        return self.page("Page not found", body, root)
+
     def redirect_page(self, to, who):
         to_e = esc(to)
         return (f'<!doctype html><html lang="{esc(self.cfg["language"])}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -1371,8 +1401,7 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     if ns:
         w("news-sitemap.xml", ns)
     w(".nojekyll", "")
-    w("404.html", site.page("Page not found",
-                            '<div class="wrap empty"><h1>Page not found</h1><p>Try the menu above or search.</p></div>', ""))
+    w("404.html", site.not_found())
 
 
 def main():

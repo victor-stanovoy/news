@@ -301,3 +301,9 @@ then open http://localhost:8000. (Needs Python 3.9 or newer, nothing else to ins
 ## One-time GitHub setup
 
 Repository **Settings → Pages → Build and deployment → Source: GitHub Actions**. After that every push to `main` publishes the site. The site also rebuilds every hour so scheduled articles go live on time.
+
+## 404 page and partner logos
+
+* `404.html` is a small catch-the-404s game (arrow keys, A/D or drag on a phone). GitHub Pages serves it automatically for unknown addresses.
+* Each partner in **Settings > Partners** can have a **logo** (paste an https address or upload an image). It replaces the site name in the header of that partner's embed.
+* In the article editor, **Where it appears** is one drop-down: everywhere, main site and a partner, only in a partner (hidden on the main site), or main site sends readers to the partner. No new Supabase steps are needed.

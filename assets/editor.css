@@ -232,3 +232,4 @@ body.focusing{overflow:hidden}
 .inl{display:flex;gap:8px;align-items:center}
 .tvmore{margin:12px 0}
 @media (max-width:640px){.pads{grid-template-columns:repeat(2,1fr)}}
+.badge.ptag{background:var(--accent);color:#fff;border-color:var(--accent);margin-left:4px}
