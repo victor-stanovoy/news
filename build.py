@@ -1336,6 +1336,8 @@ def view_for(arts, partners, viewer, base=""):
     pm = {p["slug"]: p for p in partners}
     keep, red = [], {}
     for a in arts:
+        if viewer and not a.label and a.pmode == "main":   # only the main website
+            continue
         p = pm.get(a.label)
         mode = (a.pmode or (p or {}).get("main") or "redirect") if p else ""
         if p and a.label != viewer and mode != "show":          # "show" = it belongs to the partner but also appears everywhere
