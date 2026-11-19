@@ -726,7 +726,7 @@ class Site:
         cfg = self.cfg
         seo = cfg["seo"]
         suf = seo.get("title_suffix")
-        full = (title + (suf if suf else f" | {cfg['site_name']}")) if title else cfg["site_name"]
+        full = (title + (suf if suf else f" | {cfg['site_name']}")) if title else f"{cfg['site_name']} – {cfg['tagline']}"
         desc = desc or seo.get("default_description") or cfg["tagline"]
         base = cfg["base_url"].rstrip("/")
         og = f'<meta property="og:title" content="{esc(title or cfg["site_name"])}">' \
@@ -1086,7 +1086,7 @@ class Site:
             items = [a for a in c["items"] if a.slug not in shown][:4] or c["items"][:4]
             blocks += (f'<section class="catband"><div class="wrap catblock"><h2 class="sec"><a href="c/{slug}.html">{esc(c["name"])} &rsaquo;</a></h2>'
                        f'<div class="grid4">{"".join(self.card(a, root, "s") for a in items)}</div></div></section>')
-        return self.page("", banner + top + chipbar + lat + spotlight + blocks, root,
+        return self.page("", f'<h1 class="sr">{esc(cfg["site_name"])} – {esc(cfg["tagline"])}</h1>' + banner + top + chipbar + lat + spotlight + blocks, root,
                          desc=cfg["tagline"], image=self.img(hero.image_raw, root), path="index.html")
 
     def category(self, slug, c):
@@ -1166,7 +1166,7 @@ class Site:
 
         src = self.img(a.image_raw, root)
         if src:
-            parts.append(f'<figure class="cover"><img src="{esc(src)}" alt="" style="object-position:{a.fx}% {a.fy}%" '
+            parts.append(f'<figure class="cover"><img src="{esc(src)}" alt="{esc(title)}" fetchpriority="high" style="object-position:{a.fx}% {a.fy}%" '
                          f'referrerpolicy="no-referrer" onerror="this.parentNode.remove()"></figure>')
 
         if a.video:
