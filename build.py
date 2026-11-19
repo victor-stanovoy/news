@@ -64,7 +64,10 @@ DEFAULT_CONFIG = {
     "seo": {
         "indexing": True,           # False = ask search engines to stay away from the whole site (robots.txt + noindex)
         "twitter_site": "",         # your X/Twitter handle, e.g. @sparknews
-        "default_description": "",  # shown in search results when a page has no summary (falls back to the tagline)
+        "default_description": "SparkNews is an independent media organisation: original journalism on science, technology, society and culture, and a partner that helps schools run their own student media.",  # shown in search results when a page has no summary
+        "home_title": "SparkNews™ | Independent Journalism. Real Opportunities.",   # the home page's title in search results
+        "about": "SparkNews is an independent media organisation built around curiosity, creativity and the power of journalism. Our mission is to make journalism more accessible, encourage independent thinking and give new voices the opportunity to be heard. We publish articles on science, technology, society and culture, and partner with schools to establish and power their own student media platforms: writing, interviews, radio, television and digital publishing.",
+        "same_as": [],              # your profiles (X, Instagram, YouTube, LinkedIn...): full https:// addresses, helps Google link them to you
         "google_verification": "",  # the code from Google Search Console ("HTML tag" method)
         "bing_verification": "",    # the code from Bing Webmaster Tools
         "title_suffix": "",         # text after every page title, e.g. " | SparkNews" (empty = site name)
@@ -84,6 +87,9 @@ DEFAULT_CONFIG = {
         "contact": "",              # email shown on the Privacy page for questions about personal data
     },
     "partners": [],                 # white-label embeds: [{"slug","name","url","main":"redirect|hide","accent"}] (set up in the editor, Settings)
+    "editorial": {"min_words": 0, "show_wordcount": False, "admin_override": True},   # minimum article length (enforced in the editor) and word count on articles
+    "announcements": [],            # notices for visitors: bar or pop-up, with start and end (editor, Settings)
+    "maintenance": {"enabled": False, "title": "", "message": "", "eta": "", "salt": "", "hash": "", "iter": 150000},   # "be right back" page with a password bypass
     "polls": {"enabled": True},     # visitor polls: card or full-screen banner (set up in the editor first, needs supabase/polls.sql)
     "live": {"enabled": True},      # "Live" page for live radio and TV (needs the database and supabase/live.sql)
     "supabase": {"url": "", "anon_key": ""},   # the editor and database; both values are safe to publish
@@ -505,7 +511,7 @@ def clean_settings(d):
         for k in ("indexing", "block_ai_crawlers"):
             if k in s: o[k] = bool(s[k])
         if "news_sitemap" in s: o["news_sitemap"] = bool(s["news_sitemap"])
-        for k, n in (("title_suffix", 60), ("default_image", 300), ("twitter_site", 40), ("default_description", 200), ("google_verification", 120), ("bing_verification", 120)):
+        for k, n in (("title_suffix", 60), ("default_image", 300), ("twitter_site", 40), ("default_description", 200), ("home_title", 90), ("about", 700), ("google_verification", 120), ("bing_verification", 120)):
             if isinstance(s.get(k), str): o[k] = _str(s[k], n)
         if isinstance(s.get("keywords"), str):
             o["keywords"] = ", ".join(clean_keywords(s["keywords"], 30))[:600]
@@ -524,6 +530,38 @@ def clean_settings(d):
         if isinstance(s.get("redact"), list): o["redact"] = [_str(x, 80) for x in s["redact"] if isinstance(x, str) and len(x.strip()) >= 3][:200]
         if isinstance(s.get("contact"), str): o["contact"] = _str(s["contact"], 120)
         out["privacy"] = o
+    if isinstance(d.get("editorial"), dict):
+        s = d["editorial"]; o = {}
+        try: o["min_words"] = max(0, min(5000, int(s.get("min_words") or 0)))
+        except (TypeError, ValueError): pass
+        for k in ("show_wordcount", "admin_override"):
+            if k in s: o[k] = bool(s[k])
+        out["editorial"] = o
+    if isinstance(d.get("maintenance"), dict):
+        s = d["maintenance"]; o = {}
+        if "enabled" in s: o["enabled"] = bool(s["enabled"])
+        for k, n in (("title", 100), ("message", 400), ("eta", 80)):
+            if isinstance(s.get(k), str): o[k] = _str(s[k], n)
+        if isinstance(s.get("salt"), str) and re.fullmatch(r"[0-9a-f]{32}", s["salt"]): o["salt"] = s["salt"]
+        if isinstance(s.get("hash"), str) and re.fullmatch(r"[0-9a-f]{64}", s["hash"]): o["hash"] = s["hash"]
+        try: o["iter"] = max(10000, min(1000000, int(s.get("iter") or 150000)))
+        except (TypeError, ValueError): pass
+        out["maintenance"] = o
+    if isinstance(d.get("announcements"), list):
+        al = []
+        for x in d["announcements"][:30]:
+            if not isinstance(x, dict) or not isinstance(x.get("text"), str) or not x["text"].strip(): continue
+            a = {"id": re.sub(r"[^a-z0-9]", "", str(x.get("id") or "").lower())[:16] or "a%d" % len(al),
+                 "text": _str(x["text"], 300), "style": x.get("style") if x.get("style") in ("info", "good", "warn", "urgent") else "info",
+                 "mode": "popup" if x.get("mode") == "popup" else "bar", "where": "home" if x.get("where") == "home" else "all",
+                 "enabled": x.get("enabled") is not False, "dismissible": x.get("dismissible") is not False}
+            lk = _str(x.get("link") or "", 300)
+            if lk and (re.match(r"https?://", lk) or re.fullmatch(r"[A-Za-z0-9_./#?=&%~+-]+", lk)): a["link"] = lk; a["link_label"] = _str(x.get("link_label") or "", 40) or "Read more"
+            for k in ("start", "end"):
+                v = x.get(k)
+                if isinstance(v, str) and re.match(r"\d{4}-\d\d-\d\dT", v): a[k] = v[:30]
+            al.append(a)
+        out["announcements"] = al
     if isinstance(d.get("partners"), list):
         ps, seen = [], set()
         for x in d["partners"][:30]:
@@ -754,14 +792,16 @@ class Site:
                 f'{" loading=lazy fetchpriority=low" if lazy else ""}>')
 
     # -- chrome
-    def head(self, title, root, desc="", image="", path="", kind="website", alts=None, ld=None, seo_title="", keywords=None):
+    def head(self, title, root, desc="", image="", path="", kind="website", alts=None, ld=None, seo_title="", keywords=None, meta=""):
         cfg = self.cfg
         seo = cfg["seo"]
         suf = seo.get("title_suffix")
-        full = ((seo_title or title) + (suf if suf else f" | {cfg['site_name']}")) if title else f"{cfg['site_name']} – {cfg['tagline']}"
+        shown = seo_title or title
+        home_t = seo.get("home_title") or f"{cfg['site_name']} – {cfg['tagline']}"
+        full = (shown + (suf if suf else f" | {cfg['site_name']}")) if title else home_t
         desc = desc or seo.get("default_description") or cfg["tagline"]
         base = cfg["base_url"].rstrip("/")
-        og = f'<meta property="og:title" content="{esc(title or cfg["site_name"])}">' \
+        og = f'<meta property="og:title" content="{esc(shown or home_t)}">' \
              f'<meta property="og:description" content="{esc(desc)}">' \
              f'<meta property="og:type" content="{kind}">' \
              f'<meta property="og:site_name" content="{esc(cfg["site_name"])}">'
@@ -776,6 +816,7 @@ class Site:
         dimg = seo.get("default_image") if str(seo.get("default_image", "")).startswith("https://") else (base + "/assets/og-default.png" if base else "")
         if dimg and not (image and image.startswith("http")):
             og += f'<meta property="og:image" content="{esc(dimg)}"><meta name="twitter:card" content="summary_large_image">'
+        og += f'<meta name="twitter:title" content="{esc((shown or home_t)[:70])}"><meta name="twitter:description" content="{esc(desc[:200])}">' + meta
         og += f'<link rel="alternate" type="application/rss+xml" title="{esc(cfg["site_name"])}" href="{root}feed.xml">'
         kws = clean_keywords(list(keywords or []) + clean_keywords(seo.get("keywords", ""), 30), 25)
         if kws and seo.get("indexing"):
@@ -857,7 +898,7 @@ class Site:
 
     def seo_tags(self, ld=None):
         cfg = self.cfg; seo = cfg["seo"]; o = ""
-        o += '<meta name="robots" content="%s">' % ("max-image-preview:large" if seo.get("indexing") else "noindex,nofollow")
+        o += '<meta name="robots" content="%s">' % ("index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" if seo.get("indexing") else "noindex,nofollow")
         if seo.get("twitter_site"):
             o += f'<meta name="twitter:site" content="{esc(seo["twitter_site"])}">'
         if seo.get("google_verification"):
@@ -888,6 +929,19 @@ class Site:
             if seo.get("news_sitemap"):
                 out += f"Sitemap: {base}/news-sitemap.xml\n"
         return out
+
+    def about_page(self):
+        cfg = self.cfg; seo = cfg["seo"]; base = cfg["base_url"].rstrip("/")
+        body = (f'<div class="wrap narrow aboutpage"><h1>About {esc(cfg["site_name"])}</h1>'
+                f'<p class="lead"><b>Independent Journalism. Real Opportunities.</b></p>'
+                f'<p>{esc(seo.get("about") or cfg["tagline"])}</p>'
+                '<h2>Our main publication</h2><p>Our news platform publishes articles on science, technology, society, culture and other subjects that spark ideas, encourage curiosity and inspire readers to look beyond the ordinary.</p>'
+                '<h2>School media partners</h2><p>Beyond our main publication, we partner with schools to establish and power their own student media platforms. Students write articles, conduct interviews, report on their communities and explore radio, television and digital publishing. Each school platform has its own identity and editorial focus, with the infrastructure, guidance and support of SparkNews behind it.</p>'
+                '<h2>Our mission</h2><p>To make journalism more accessible, encourage independent thinking and give new voices the opportunity to be heard.</p>'
+                f'<p><a href="../index.html">Read the latest stories &rarr;</a></p></div>')
+        ld = {"@context": "https://schema.org", "@type": "AboutPage", "name": f"About {cfg['site_name']}", "url": f"{base}/about/" if base else None,
+              "mainEntity": {"@id": f"{base}/#org"} if base else None}
+        return self.page("About", body, "../", desc=(seo.get("about") or cfg["tagline"])[:200], path="about/index.html", ld={k: v for k, v in ld.items() if v})
 
     def privacy_page(self):
         cfg = self.cfg; locked = self.locked(); li = []
@@ -990,7 +1044,7 @@ class Site:
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
         return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
-                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}privacy/index.html">Privacy</a></p>'
+                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}about/index.html">About</a> &middot; <a href="{root}privacy/index.html">Privacy</a></p>'
                 f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
 
     def ticker_entries(self, root):
@@ -1044,15 +1098,60 @@ class Site:
         if title == "" and not kw.get("ld"):
             base = self.cfg["base_url"].rstrip("/")
             kw["ld"] = {"@context": "https://schema.org", "@type": "NewsMediaOrganization", "name": self.cfg["site_name"], "url": base or None,
-                        "logo": (self.cfg["seo"].get("logo") or f"{base}/assets/logo.png") if base else None, "description": self.cfg["tagline"],
+                        "logo": (self.cfg["seo"].get("logo") or f"{base}/assets/logo.png") if base else None, "description": self.cfg["seo"].get("about") or self.cfg["tagline"],
                         "sameAs": self.cfg["seo"].get("same_as") or None,
                         "keywords": ", ".join(clean_keywords(self.cfg["seo"].get("keywords", ""), 30)) or None}
             kw["ld"] = {k: v for k, v in kw["ld"].items() if v}
             if base:
                 kw["ld"] = [kw["ld"], {"@context": "https://schema.org", "@type": "WebSite", "name": self.cfg["site_name"], "url": base + "/",
+                                       "inLanguage": self.cfg["language"], "publisher": {"@id": f"{base}/#org"},
                                        "potentialAction": {"@type": "SearchAction", "target": f"{base}/search.html?q={{search_term_string}}", "query-input": "required name=search_term_string"}}]
-        return (self.head(title, root, **kw) + self.header(root, active) + self.ticker(root)
-                + f'<main id="main" data-page="{"article" if kw.get("kind") == "article" else "home" if title == "" else "other"}">{body}</main>' + self.footer(root))
+        hd, top, tail = self.head(title, root, **kw), self.header(root, active), ""
+        m_head, m_top, m_tail = self.maint_parts(root)
+        a_top, a_tail = self.announce_parts(root, title == "")
+        hd = hd.replace("</head>", m_head + "</head>", 1)
+        top = top.replace("Skip to content</a>", "Skip to content</a>" + m_top + a_top, 1)
+        out = (hd + top + self.ticker(root)
+               + f'<main id="main" data-page="{"article" if kw.get("kind") == "article" else "home" if title == "" else "other"}">{body}</main>' + self.footer(root))
+        extra = m_tail + a_tail
+        return out.replace("</body>", extra + "</body>", 1) if extra else out
+
+    def maint_parts(self, root):
+        """Maintenance mode: an overlay that hides the site until the team types the bypass password on that device."""
+        m = self.cfg.get("maintenance") or {}
+        if not m.get("enabled"):
+            return "", "", ""
+        tag = (m.get("hash") or "none")[:8]
+        head = (f'<script>(function(){{try{{if(localStorage.getItem("spark-bypass-{tag}")==="1")return}}catch(e){{}}'
+                f'document.documentElement.classList.add("maint")}})()</script>')
+        title = m.get("title") or "We will be right back"
+        msg = m.get("message") or "We are making some improvements. Please check back soon."
+        eta = f'<p class="mnt-eta">Back: <b>{esc(m["eta"])}</b></p>' if m.get("eta") else ""
+        team = ""
+        data = ""
+        if m.get("hash") and m.get("salt"):
+            team = ('<details class="mnt-team"><summary>Team access</summary><form class="mnt-form" autocomplete="off">'
+                    '<label for="mnt-pw">Password</label><div><input id="mnt-pw" type="password" autocomplete="current-password" required>'
+                    '<button type="submit">Enter</button></div><p class="mnt-err" role="alert"></p></form></details>')
+            data = f'<script type="application/json" id="mnt-data">{json.dumps({"salt": m["salt"], "hash": m["hash"], "iter": m.get("iter") or 150000, "tag": tag})}</script>'
+        top = (f'<div class="mnt" id="maint" role="dialog" aria-modal="true" aria-labelledby="mnt-t"><div class="mnt-card">'
+               f'<p class="mnt-site">{esc(self.cfg["site_name"])}</p><h1 id="mnt-t">{esc(title)}</h1><p class="mnt-msg">{esc(msg)}</p>{eta}{team}</div></div>')
+        tail = data + (f'<script src="{root}assets/maintenance.js?v={asset_ver("maintenance.js")}" defer></script>' if team else "")
+        return head, top, tail
+
+    def announce_parts(self, root, home):
+        items = []
+        now = self.now.isoformat()
+        for a in self.cfg.get("announcements") or []:
+            if not a.get("enabled", True):
+                continue
+            if a.get("end") and a["end"] < now[:19]:   # already over: leave it out of the page
+                continue
+            items.append(a)
+        if not items:
+            return "", ""
+        data = json.dumps({"root": root, "home": bool(home), "lock": bool(self.locked()), "items": items}, ensure_ascii=False).replace("</", "<\\/")
+        return "", f'<script type="application/json" id="ann-data">{data}</script><script src="{root}assets/announce.js?v={asset_ver("announce.js")}" defer></script>'
 
     # -- cards
     def meta(self, a, with_cat=True):
@@ -1127,7 +1226,7 @@ class Site:
             blocks += (f'<section class="catband"><div class="wrap catblock"><h2 class="sec"><a href="c/{slug}.html">{esc(c["name"])} &rsaquo;</a></h2>'
                        f'<div class="grid4">{"".join(self.card(a, root, "s") for a in items)}</div></div></section>')
         return self.page("", f'<h1 class="sr">{esc(cfg["site_name"])} – {esc(cfg["tagline"])}</h1>' + banner + top + chipbar + lat + spotlight + blocks, root,
-                         desc=cfg["tagline"], image=self.img(hero.image_raw, root), path="index.html")
+                         image=self.img(hero.image_raw, root), path="index.html")
 
     def category(self, slug, c):
         root = "../"
@@ -1189,7 +1288,7 @@ class Site:
             f'<h1>{live}{esc(title)}</h1>'
             f'{"<p class=sub>" + esc(subtitle) + "</p>" if subtitle else ""}'
             f'<p class="byline">{by}<time datetime="{a.date.isoformat()}">{fmt_datetime(a.date)}</time>{upd}'
-            f' · {a.read_min} min read</p>'
+            f' · {a.read_min} min read{" · " + format(a.words, ",") + " words" if self.cfg["editorial"].get("show_wordcount") else ""}</p>'
             f'{"<a class=editlink hidden href=" + root + "editor/#/edit/" + esc(a.id) + ">Edit this article</a>" if a.from_db else ""}'
             f'</header>')
 
@@ -1288,8 +1387,11 @@ class Site:
                 {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{base}/index.html"},
                 {"@type": "ListItem", "position": 2, "name": a.category, "item": f"{base}/c/{a.cat_slug}.html"},
                 {"@type": "ListItem", "position": 3, "name": title[:110]}]}]
+        meta = (f'<meta property="article:published_time" content="{a.date.isoformat()}">'
+                f'<meta property="article:modified_time" content="{(a.updated if a.updated and a.updated >= a.date else a.date).isoformat()}">'
+                f'<meta property="article:section" content="{esc(a.category)}">')
         return self.page(title, art, root, active=a.cat_slug, desc=desc, image=src, kind="article",
-                         path=f"a/{fname}.html", alts=alts, ld=ld, keywords=kws, seo_title="" if tr else a.seo_title)
+                         path=f"a/{fname}.html", alts=alts, ld=ld, keywords=kws, seo_title="" if tr else a.seo_title, meta=meta)
 
     def embed_page(self, a):
         h = a.raw_content
@@ -1302,18 +1404,27 @@ class Site:
         return h
 
     def not_found(self):
-        """The 404 page: GitHub Pages serves it from any address, so every link in it must be absolute."""
+        """The 404 page. GitHub Pages serves it for any address at any depth, so every link is absolute and a tiny
+        script also works out the site folder from the address, in case the site is moved."""
         base = self.cfg["base_url"].rstrip("/")
         pre = urlsplit(base).path.rstrip("/") if base else ""
         root = pre + "/"
-        body = (f'<div class="wrap lost"><p class="code" aria-hidden="true">4<span>0</span>4</p>'
+        fix = (f'<script>(function(){{var p={json.dumps(pre)},r=(p===""||location.pathname===p||location.pathname.indexOf(p+"/")===0)?p+"/":"/";window.__root=r;'
+               f'if(r!=={json.dumps(root)}){{document.write(\'<link rel="stylesheet" href="\'+r+\'assets/style.css">\');}}'
+               f'document.addEventListener("DOMContentLoaded",function(){{if(r==={json.dumps(root)})return;document.querySelectorAll("a[href^=\\""+{json.dumps(root)}+"\\"]").forEach(function(a){{a.setAttribute("href",r+a.getAttribute("href").slice({len(root)}))}})}});}})();</script>')
+        body = (f'{fix}<section class="lost2"><div class="wrap lostgrid">'
+                f'<div class="losttxt"><p class="code" aria-hidden="true">4<span>0</span>4</p>'
                 f'<h1>This page wandered off</h1>'
-                f'<p class="lead">We looked everywhere, even behind the sofa. While you are here, catch some headlines and dodge the 404s.</p>'
-                f'<div class="gamebox"><div class="gscores"><span>Score <b id="gscore">0</b></span><span>Best <b id="gbest">0</b></span></div>'
-                f'<canvas id="game" tabindex="0" width="360" height="480" role="img" aria-label="Game: move the atom left and right to catch headlines and avoid the 404 blocks"></canvas>'
-                f'<p id="gmsg" class="gmsg" role="status"></p><button id="gstart" class="gbtn" type="button">Play</button>'
-                f'<p class="small">Arrow keys or A and D to move. On a phone, drag your finger.</p></div>'
-                f'<p class="lostlinks"><a href="{root}index.html">Home page</a> &middot; <a href="{root}search.html">Search</a></p></div>'
+                f'<p class="lead">We looked everywhere, even behind the sofa. The address you tried does not exist (any more).</p>'
+                f'<p class="lostaddr"><code id="lostpath"></code></p>'
+                f'<p class="lostbtns"><a class="gbtn" href="{root}index.html">Take me home</a> <a class="gbtn ghost" href="{root}search.html">Search</a> '
+                f'<button id="lostrand" class="gbtn ghost" type="button" hidden>Surprise me</button></p>'
+                f'<div id="lostsug" class="lostsug" hidden></div></div>'
+                f'<div class="gamecard"><div class="gscores"><span>Score <b id="gscore">0</b></span><span id="glives" class="glives" aria-label="Lives"></span><span>Best <b id="gbest">0</b></span></div>'
+                f'<canvas id="game" tabindex="0" width="400" height="500" role="img" aria-label="Game: catch the headlines with the atom and dodge the 404 blocks. Arrow keys or A and D to move, space to pause."></canvas>'
+                f'<p id="gmsg" class="gmsg" role="status"></p><p class="small">Arrow keys, A and D, mouse or finger to move. Space pauses.</p></div>'
+                f'</div></section>'
+                f'<script>document.getElementById("lostpath").textContent=location.pathname+location.search</script>'
                 f'<script src="{root}assets/404.js?v={asset_ver("404.js")}" defer></script>')
         return self.page("Page not found", body, root)
 
@@ -1334,7 +1445,7 @@ class Site:
             if mod: x += f"<lastmod>{mod.strftime('%Y-%m-%d')}</lastmod>"
             if img and str(img).startswith("http"): x += f"<image:image><image:loc>{esc(img)}</image:loc></image:image>"
             return x + "</url>"
-        rows = [u(f"{base}/index.html")] + [u(f"{base}/c/{s}.html") for s in self.cats]
+        rows = [u(f"{base}/index.html"), u(f"{base}/about/index.html")] + [u(f"{base}/c/{s}.html") for s in self.cats]
         for a in self.arts:
             if a.is_embed or a.slug in skip: continue
             mod = a.updated or a.date
@@ -1421,6 +1532,8 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     w("search.html", site.search_page())
     (out / "privacy").mkdir()
     w("privacy/index.html", site.privacy_page())
+    (out / "about").mkdir()
+    w("about/index.html", site.about_page())
     w("robots.txt", site.robots())
     (out / "settings").mkdir()
     w("settings/index.html", site.settings_page())

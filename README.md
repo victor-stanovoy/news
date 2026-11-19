@@ -326,3 +326,20 @@ One-time setup: run `supabase/channels.sql` in the Supabase SQL Editor (run `sup
 * **Programme library**: add a YouTube link (title and length are found automatically; the video owner must allow embedding) or upload a video or audio file up to 50 MB. Give each a topic.
 * **Planner**: drag programmes onto the day, or press Add (it goes after the last programme). Overlaps are pushed to the next free time. Click a block to change its time, repeat it tomorrow or remove it. *Fill the rest of the day* repeats programmes of one topic, *Copy this day* repeats a day for up to a week.
 * Visitors see every channel on the Live page. When nobody is live a channel plays what the schedule says, in sync for everyone. A live broadcast always takes over.
+
+
+## Word count, announcements and maintenance mode
+
+All three are in the editor under **Settings** (admins only). Run `supabase/settings.sql` once so the new settings can be saved.
+
+- **Word count.** The article form shows a live word count. Set a minimum under *Articles*: writers cannot publish shorter pieces, and admins can override with a confirmation. You can also show "N words" in the byline of published articles.
+- **Announcements.** Bars or pop-ups with a style, an optional link, a start and end time, and a choice of home page only or every page. Visitors can close them; the choice is remembered on their device.
+- **Maintenance mode.** Shows a "back soon" screen to visitors. Anyone who types the bypass password sees the site normally. Only a salted hash of the password is stored. It hides the site from visitors but is not a security lock.
+
+## Search engine optimisation
+
+The build writes, for every page: a title and description, canonical link, Open Graph and X (Twitter) cards, `NewsMediaOrganization`, `WebSite` (with search box), `AboutPage`, `NewsArticle` (with word count, section, modified date, keywords) and `BreadcrumbList` structured data, `hreflang` for translations, a sitemap, a Google News sitemap and `robots.txt`.
+
+- **Per article:** the article form has *Search and sharing* fields (search title, description, keywords). Run `supabase/seo.sql` once to add the columns.
+- **Whole site:** `seo` in Settings or `site.json`: `home_title`, `default_description`, `about` (your mission text, also used on the About page), `same_as` (links to your social profiles), `twitter_site`, `google_verification` and `bing_verification`.
+- **To rank:** add the site in Google Search Console and Bing Webmaster Tools, paste the verification codes in Settings, and submit `sitemap.xml`. Nobody can guarantee a number one ranking: it also depends on publishing good original articles regularly and on other sites linking to you.

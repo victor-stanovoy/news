@@ -151,7 +151,7 @@
       if (r.error) return renderLogin('Could not check your access: ' + r.error.message);
       if (!r.data) return renderNoAccess();
       me.role = r.data.role; me.name = r.data.name || '';
-      Promise.all([loadArticles(), sb.rpc('rebuild_configured'), loadChannels()]).then(function (res) {
+      Promise.all([loadArticles(), sb.rpc('rebuild_configured'), loadChannels(), loadEditorial()]).then(function (res) {
         rebuildReady = !res[1].error && res[1].data === true;   /* false when instant updates are not set up */
         renderWork();
       });
@@ -480,6 +480,14 @@
   }
 
   /* ---------------------------------------------------------------- live radio and TV (LiveKit) */
+  var editorial = { min_words: 0, admin_override: true };   /* the minimum article length set in Settings */
+  function loadEditorial() {
+    return sb.from('site_settings').select('data').eq('id', 1).maybeSingle().then(function (r) {
+      var e = r && r.data && r.data.data && r.data.data.editorial;
+      if (e) editorial = { min_words: Math.max(0, parseInt(e.min_words, 10) || 0), admin_override: e.admin_override !== false };
+    }, function () {});
+  }
+  function wordsIn(text) { var m = String(text || '').match(/[^\s]+/g); return m ? m.length : 0; }
   var channels = [{ slug: 'tv', type: 'tv', name: 'Live TV' }, { slug: 'radio', type: 'radio', name: 'Live radio' }];   /* every channel the visitors can see; reloaded after sign-in */
   function typeOf(k) { var c = channels.filter(function (x) { return x.slug === k; })[0]; return c ? c.type : (k === 'radio' ? 'radio' : 'tv'); }
   function anyAir(type) { return Object.keys(onAir).some(function (k) { return onAir[k] && (!type || typeOf(k) === type); }); }
@@ -1285,7 +1293,7 @@
         return box.replaceChildren(h('div', { class: 'msg err', text: /relation|does not exist|schema cache|permission/i.test(res[0].error.message || '') ? 'Settings are not set up yet. Run supabase/settings.sql in the Supabase SQL Editor (see the README), then reload.' : errText(res[0].error) }));
       }
       var V = deepMerge(cfg.site || {}, (res[0].data && res[0].data.data) || {});
-      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {}; V.newsletter = V.newsletter || {}; V.seo = V.seo || {}; V.partners = V.partners || []; V.privacy = V.privacy || {}; V.polls = V.polls || {};
+      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {}; V.newsletter = V.newsletter || {}; V.seo = V.seo || {}; V.partners = V.partners || []; V.privacy = V.privacy || {}; V.polls = V.polls || {}; V.editorial = V.editorial || {}; V.announcements = V.announcements || []; V.maintenance = V.maintenance || {};
       var st = {}; (res[1].data || []).forEach(function (x) { st[x.key] = x; });
       var mark = function () { dirty = true; dirtyEl.textContent = 'Unsaved changes'; };
       var dirtyEl = h('span', { class: 'dirty' });
@@ -1295,6 +1303,61 @@
         return i;
       }
       function tick(obj, key, label) { var c = check(label, !!obj[key], function () { obj[key] = c.input.checked; mark(); }); return c.box; }
+
+      function toLocalDT(iso) { if (!iso) return ''; var d = new Date(iso); if (isNaN(d)) return ''; var z = function (n) { return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours()) + ':' + z(d.getMinutes()); }
+      function fromLocalDT(v) { if (!v) return ''; var d = new Date(v); return isNaN(d) ? '' : d.toISOString(); }
+      function annPanel() {
+        var list = h('div', { class: 'annlist' }), box = h('section', { class: 'panel annpanel' }, h('h3', { text: 'Announcements' }),
+          h('p', { class: 'hint', text: 'A short notice for every visitor: a coloured bar above the header or a pop-up. Set when it starts and ends and it appears and disappears by itself (after "Update website").' }), list);
+        function draw() {
+          list.replaceChildren.apply(list, V.announcements.map(function (a, i) {
+            var text = h('input', { type: 'text', maxlength: '300', value: a.text || '', placeholder: 'e.g. School is closed on Monday', oninput: function () { a.text = text.value; mark(); } });
+            var style = h('select', { onchange: function () { a.style = style.value; mark(); } }, [['info', 'Information (blue)'], ['good', 'Good news (green)'], ['warn', 'Warning (yellow)'], ['urgent', 'Urgent (red)']].map(function (o) { return h('option', { value: o[0], text: o[1] }); })); style.value = a.style || 'info';
+            var mode = h('select', { onchange: function () { a.mode = mode.value; mark(); } }, [['bar', 'Bar above the header'], ['popup', 'Pop-up window']].map(function (o) { return h('option', { value: o[0], text: o[1] }); })); mode.value = a.mode || 'bar';
+            var where = h('select', { onchange: function () { a.where = where.value; mark(); } }, [['all', 'On every page'], ['home', 'Only on the home page']].map(function (o) { return h('option', { value: o[0], text: o[1] }); })); where.value = a.where || 'all';
+            var link = h('input', { type: 'text', maxlength: '300', value: a.link || '', placeholder: 'https://… or a/some-article.html (optional)', oninput: function () { a.link = link.value; mark(); } });
+            var label = h('input', { type: 'text', maxlength: '40', value: a.link_label || '', placeholder: 'Read more', oninput: function () { a.link_label = label.value; mark(); } });
+            var st = h('input', { type: 'datetime-local', value: toLocalDT(a.start), onchange: function () { a.start = fromLocalDT(st.value); mark(); } });
+            var en = h('input', { type: 'datetime-local', value: toLocalDT(a.end), onchange: function () { a.end = fromLocalDT(en.value); mark(); } });
+            var on = check('Switched on', a.enabled !== false, function () { a.enabled = on.input.checked; mark(); });
+            var dis = check('Visitors can close it', a.dismissible !== false, function () { a.dismissible = dis.input.checked; mark(); });
+            return h('div', { class: 'annitem' }, field('Message', text),
+              h('div', { class: 'row2' }, field('Look', style), field('Shown as', mode)), field('Where', where),
+              h('div', { class: 'row2' }, field('Link (optional)', link), field('Link text', label)),
+              h('div', { class: 'row2' }, field('Starts (empty = right away)', st), field('Ends (empty = until you remove it)', en)),
+              on.box, dis.box, h('div', { class: 'btnrow' }, h('button', { class: 'btn danger', type: 'button', text: 'Delete announcement', onclick: function () { V.announcements.splice(i, 1); mark(); draw(); } })));
+          }));
+          if (!V.announcements.length) list.appendChild(h('p', { class: 'hint', text: 'No announcements yet.' }));
+        }
+        draw();
+        box.appendChild(h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'New announcement', onclick: function () {
+          V.announcements.push({ id: Math.random().toString(36).slice(2, 10), text: '', style: 'info', mode: 'bar', where: 'all', enabled: true, dismissible: true }); mark(); draw(); } })));
+        return box;
+      }
+      function pbkdf(pw, saltHex, iter) {
+        var salt = new Uint8Array((saltHex.match(/../g) || []).map(function (x) { return parseInt(x, 16); }));
+        return crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']).then(function (k) {
+          return crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: salt, iterations: iter }, k, 256);
+        }).then(function (b) { return [].map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join(''); });
+      }
+      function maintPanel() {
+        var M = V.maintenance; if (M.title === undefined) M.title = ''; 
+        var pw = h('input', { type: 'password', autocomplete: 'new-password', placeholder: M.hash ? 'A password is set. Type a new one to change it.' : 'Choose a long password', 'aria-label': 'Bypass password' });
+        var pwMsg = h('p', { class: 'hint', text: M.hash ? 'A bypass password is set.' : 'No bypass password yet. Without one nobody can get past the maintenance page (you can still use the editor).' });
+        pw.addEventListener('change', function () {
+          var v = pw.value; if (!v) return;
+          if (v.length < 8) { pwMsg.className = 'hint err'; pwMsg.textContent = 'Please use at least 8 characters.'; return; }
+          var u = new Uint8Array(16); crypto.getRandomValues(u); var salt = [].map.call(u, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+          pbkdf(v, salt, 150000).then(function (hex) { M.salt = salt; M.hash = hex; M.iter = 150000; pw.value = ''; pw.placeholder = 'A password is set. Type a new one to change it.'; pwMsg.className = 'hint ok'; pwMsg.textContent = 'Password ready. Press "Save settings", then "Update website".'; mark(); });
+        });
+        return h('section', { class: 'panel' }, h('h3', { text: 'Maintenance mode' }),
+          tick(M, 'enabled', 'Turn maintenance mode on (visitors see a "be right back" page instead of the website)'),
+          field('Title', bind(M, 'title', 'text', { maxlength: 100, placeholder: 'We will be right back' })),
+          field('Message', bind(M, 'message', 'text', { maxlength: 400, placeholder: 'We are making improvements. Please check back soon.' })),
+          field('Back at (optional)', bind(M, 'eta', 'text', { maxlength: 80, placeholder: 'e.g. Tomorrow at 9:00' })),
+          field('Bypass password for your team', pw, 'On the maintenance page there is a "Team access" box. Enter this password and you see the normal website on that device.'), pwMsg,
+          h('p', { class: 'hint', text: 'It takes effect after "Save settings" and "Update website". The editor stays open. This hides the site from visitors, it is not a security lock: the pages are still public files.' }));
+      }
       var nav = h('input', { type: 'text', value: (V.nav_order || []).join(', '), placeholder: 'Politics, Business, Sport', oninput: function () { V.nav_order = nav.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean); mark(); } });
       var custom = h('textarea', { placeholder: 'One headline per line. Optional link after a bar:\nPlain headline\nWith link | a/some-article.html',
         oninput: function () { V.ticker.custom = custom.value.split('\n').map(function (l) { var p = l.split('|'); var t = p[0].trim(); return !t ? null : p[1] && p[1].trim() ? { text: t, url: p.slice(1).join('|').trim() } : t; }).filter(Boolean); mark(); } });
@@ -1307,6 +1370,7 @@
         sb.rpc('settings_save', { p_data: V }).then(function (r) {
           saveBtn.disabled = false;
           if (r.error) return toast(errText(r.error), true);
+          if (V.editorial) editorial = { min_words: Math.max(0, parseInt(V.editorial.min_words, 10) || 0), admin_override: V.editorial.admin_override !== false };
           dirty = false; dirtyEl.textContent = '';
           toast(rebuildReady ? 'Saved. The website updates in about a minute.' : 'Saved. Press "Update website" (top right) to apply it to the website.');
         });
@@ -1389,6 +1453,12 @@
             h('div', { class: 'row2' }, field('Sections in the menu', bind(V, 'nav_max', 'number', { min: 1, max: 20 })), field('Sections on the homepage', bind(V, 'home_category_sections', 'number', { min: 0, max: 20 }))),
             h('div', { class: 'row2' }, field('Items in "Most read"', bind(V, 'most_read_count', 'number', { min: 1, max: 20 })), field('Breaking banner hides after (days, 0 = never)', bind(V, 'breaking_max_age_days', 'number', { min: 0, max: 365 }))),
             field('Menu order', nav, 'Section names, separated by commas. Sections not listed follow after.')),
+
+          h('section', { class: 'panel' }, h('h3', { text: 'Articles' }),
+            field('Minimum words to publish', bind(V.editorial, 'min_words', 'number', { min: 0, max: 5000, step: 10 }), '0 = no minimum. Writers see a live word count; articles below the minimum can be saved as drafts but not published.'),
+            tick(V.editorial, 'admin_override', 'Admins may publish a shorter article anyway (they get a confirmation)'),
+            tick(V.editorial, 'show_wordcount', 'Show the word count next to "min read" on published articles')),
+          annPanel(), maintPanel(),
           h('section', { class: 'panel' }, h('h3', { text: 'Tickers' }),
             tick(V.ticker, 'enabled', 'Show the headline bar under the menu'),
             h('div', { class: 'row2' }, field('Tag text', bind(V.ticker, 'label', 'text', { maxlength: 30 })), field('Headlines shown', bind(V.ticker, 'count', 'number', { min: 1, max: 30 }))),
@@ -1518,7 +1588,17 @@
     f.subtitle = h('input', { type: 'text', class: 'sub-in', placeholder: 'Standfirst (optional one-line summary)', value: a.subtitle || '', maxlength: 400 });
 
     /* body: rich text, or raw HTML for admins */
-    var bodyBox = h('div');
+    var bodyBox = h('div'), wcBar = h('p', { class: 'wcbar', role: 'status' });
+    function bodyText() {
+      if (quill) return quill.getText();
+      if (f.rawHtml) return f.rawHtml.value.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]*>/g, ' ');
+      return String(a.content || '').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]*>/g, ' ');
+    }
+    function updateWc() {
+      var n = wordsIn(bodyText()), min = editorial.min_words || 0, mins = Math.max(1, Math.round(n / 220));
+      wcBar.className = 'wcbar' + (min && n < min ? ' short' : (min ? ' ok' : ''));
+      wcBar.textContent = n + (n === 1 ? ' word' : ' words') + ' · about ' + mins + ' min read' + (min ? (n < min ? ' · ' + (min - n) + ' more needed to publish (minimum ' + min + ')' : ' · minimum ' + min + ' reached ✓') : '');
+    }
     f.contentType = h('select', { onchange: function () { mark(); buildBody(); } },
       h('option', { value: 'rich', text: 'Normal article' }),
       me.role === 'admin' || isHtml ? h('option', { value: 'html', text: 'Full HTML page (admin only)' }) : null,
@@ -1543,13 +1623,14 @@
             } } } }
         });
         quill.clipboard.dangerouslyPasteHTML(contentHtml || '');
-        quill.on('text-change', function (d, o, src) { if (src === 'user') mark(); });
+        quill.on('text-change', function (d, o, src) { if (src === 'user') mark(); updateWc(); });
       } else if (me.role === 'admin') {
-        f.rawHtml = h('textarea', { class: 'code', style: 'min-height:420px', spellcheck: 'false', oninput: mark }); f.rawHtml.value = contentHtml;
+        f.rawHtml = h('textarea', { class: 'code', style: 'min-height:420px', spellcheck: 'false', oninput: function () { mark(); updateWc(); } }); f.rawHtml.value = contentHtml;
         bodyBox.replaceChildren(h('div', { class: 'msg info', text: 'This article is shown as its own full page. Paste a complete HTML document.' }), f.rawHtml);
       } else {
         bodyBox.replaceChildren(h('div', { class: 'msg info', text: 'This is a full-HTML page. Only admins can change its content. You can still edit everything else.' }));
       }
+      updateWc(); loadEditorial().then(updateWc);
     }
 
     /* focus window: full screen writing; everything except the line you are on is dimmed */
@@ -1686,7 +1767,7 @@
     mainEl.replaceChildren(
       h('div', { class: 'head' }, h('h2', { text: isNew ? 'New article' : 'Edit article' }), dirtyEl, focusBtn, prevBtn, viewBtn, saveBtn, pubBtn),
       h('div', { class: 'cols' },
-        h('div', {}, h('div', { class: 'panel' }, f.title, f.subtitle), h('div', { class: 'panel' }, bodyBox)),
+        h('div', {}, h('div', { class: 'panel' }, f.title, f.subtitle), h('div', { class: 'panel' }, bodyBox, wcBar)),
         h('div', {},
           h('div', { class: 'panel' }, h('h3', { text: 'Publishing' }), field('Status', f.status, canPublish() ? '' : 'Writers save drafts. An editor will publish them.'), schedField, pubField, (partnerList().length || a.partner_label || a.partner_mode === 'main') ? field('Where it appears', f.where, 'Pick a partner to share this story with their embed, or to keep it out of the main website.') : null, tk.box, ft.box, br.box, f.breakingText),
           h('div', { class: 'panel' }, h('h3', { text: 'Details' }), field('Section', f.category), catList, field('Author', f.author), av.box),
@@ -1754,6 +1835,15 @@
       if (!canPublish()) d.status = 'draft';
       if (d.status === 'published' && !d.published_at) d.published_at = new Date().toISOString();
       if (d.status === 'scheduled' && !d.scheduled_publish_at) return toast('Pick the date and time it should go live', true);
+      if ((d.status === 'published' || d.status === 'scheduled') && editorial.min_words > 0 && !d.is_live_update) {
+        var wn = wordsIn(bodyText());
+        if (wn < editorial.min_words) {
+          var gap = editorial.min_words - wn, msgW = 'This article has ' + wn + ' words. The minimum is ' + editorial.min_words + ' (' + gap + ' more).';
+          if (!(me.role === 'admin' && editorial.admin_override !== false && window.confirm(msgW + '\n\nAs an admin you can publish it anyway. Publish it anyway?'))) {
+            return toast(msgW + ' Save it as a draft or keep writing.', true);
+          }
+        }
+      }
       saving = true; saveBtn.disabled = true; if (pubBtn) pubBtn.disabled = true;
       var req;
       if (!a.id) { d.slug = uniqueSlug(d.title); req = sb.from('articles').insert(d).select().single(); }
