@@ -151,7 +151,7 @@
       if (r.error) return renderLogin('Could not check your access: ' + r.error.message);
       if (!r.data) return renderNoAccess();
       me.role = r.data.role; me.name = r.data.name || '';
-      Promise.all([loadArticles(), sb.rpc('rebuild_configured')]).then(function (res) {
+      Promise.all([loadArticles(), sb.rpc('rebuild_configured'), loadChannels()]).then(function (res) {
         rebuildReady = !res[1].error && res[1].data === true;   /* false when instant updates are not set up */
         renderWork();
       });
@@ -164,7 +164,7 @@
       h('p', { text: 'You are signed in as ' + me.email + ', but this account has not been given a role yet. Ask an admin to add this email in the Team panel, then reload this page.' }),
       h('button', { class: 'btn wide', text: 'Sign out', onclick: signOut }))));
   }
-  function signOut() { stopLive('radio'); stopLive('tv'); view = ''; nlRoot = null; nlDirty = false; sb.auth.signOut().then(function () { articles = []; current = null; renderLogin(); }); }
+  function signOut() { Object.keys(onAir).forEach(stopLive); view = ''; nlRoot = null; nlDirty = false; sb.auth.signOut().then(function () { articles = []; current = null; renderLogin(); }); }
 
   /* ---------------------------------------------------------------- partners: where a story appears */
   var MAIN_ONLY = '_main';   /* stored as no partner label + partner_mode = 'main' */
@@ -246,7 +246,7 @@
       h('button', { class: 'lnk', type: 'button', text: 'Password', onclick: function () { guard(function () { renderPassword(false); }); } }),
       h('button', { class: 'lnk', type: 'button', text: 'Sign out', onclick: function () { guard(signOut); } }));
 
-    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['newsletter', 'Newsletter', '#/newsletter'], ['polls', 'Polls', '#/polls']] : [], me.role === 'admin' ? [['badges', 'Badges', '#/badges'], ['settings', 'Settings', '#/settings']] : []);
+    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['schedule', 'Schedule', '#/schedule'], ['newsletter', 'Newsletter', '#/newsletter'], ['polls', 'Polls', '#/polls']] : [], me.role === 'admin' ? [['badges', 'Badges', '#/badges'], ['settings', 'Settings', '#/settings']] : []);
     tabsEl = h('nav', { class: 'tabs', 'aria-label': 'Workspaces' }, windows.map(function (w) {
       return h('button', { class: 'tab', type: 'button', 'data-v': w[0], onclick: function () { guard(function () { if (location.hash === w[2] || (w[0] === 'articles' && !location.hash)) route(); else location.hash = w[2]; }); } },
         w[1], w[0] === 'radio' || w[0] === 'tv' ? h('i', { class: 'dot', title: 'On air' }) : null);
@@ -261,7 +261,7 @@
     if (!tabsEl) return;
     tabsEl.querySelectorAll('.tab').forEach(function (t) {
       t.classList.toggle('on', t.dataset.v === view);
-      var d = t.querySelector('.dot'); if (d) d.classList.toggle('live', !!onAir[t.dataset.v]);
+      var d = t.querySelector('.dot'); if (d) d.classList.toggle('live', anyAir(t.dataset.v));
     });
   }
 
@@ -428,12 +428,28 @@
       showNewsletter().then(function (el) { if (view === 'newsletter') stage.replaceChildren(el); }).catch(function (e) { stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'msg err', text: errText(e) }))); });
       return;
     }
-    var dm = location.hash.match(/^#\/(radio|tv)$/);
+    var dm = location.hash.match(/^#\/(radio|tv)(?:\/([a-z0-9-]+))?$/);
     if (dm) {
       if (!canPublish()) { location.hash = ''; return; }
       if (dashCleanup) { dashCleanup(); dashCleanup = null; }
       current = null; dirty = false; view = dm[1];
-      stage.replaceChildren(showDash(dm[1])); paintTabs(); return;
+      var want = dm[2]; if (!want) { try { want = localStorage.getItem('spark-chan-' + dm[1]); } catch (e) {} }
+      var mineCh = channels.filter(function (c) { return c.type === dm[1]; });
+      var pick = (mineCh.filter(function (c) { return c.slug === want; })[0] || mineCh[0] || { slug: dm[1] }).slug;
+      stage.replaceChildren(showDash(dm[1], pick)); paintTabs(); return;
+    }
+    var sm = location.hash.match(/^#\/schedule(?:\/([a-z0-9-]+))?$/);
+    if (sm) {
+      if (!canPublish()) { location.hash = ''; return; }
+      if (dashCleanup) { dashCleanup(); dashCleanup = null; }
+      current = null; dirty = false; view = 'schedule';
+      stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'empty', text: 'Loading…' }))); paintTabs();
+      Promise.all([loadScript('../assets/schedule-editor.js?v=' + ((cfg.ver || {}).schedule || '')), loadChannels()]).then(function () {
+        if (view !== 'schedule') return;
+        var sc = window.SparkSchedule.mount({ h: h, field: field, check: check, toast: toast, sb: sb, errText: errText, me: me, channels: channels, getChannels: function () { return channels; }, reload: loadChannels, start: sm[1] || '', onAir: function () { return Object.keys(onAir).filter(function (k) { return onAir[k]; }); } });
+        stage.replaceChildren(sc.el); dashCleanup = sc.stop;
+      }).catch(function (e) { stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'msg err', text: errText(e) }))); });
+      return;
     }
     if (view !== 'articles') mountArticles();
     paintTabs();
@@ -464,6 +480,14 @@
   }
 
   /* ---------------------------------------------------------------- live radio and TV (LiveKit) */
+  var channels = [{ slug: 'tv', type: 'tv', name: 'Live TV' }, { slug: 'radio', type: 'radio', name: 'Live radio' }];   /* every channel the visitors can see; reloaded after sign-in */
+  function typeOf(k) { var c = channels.filter(function (x) { return x.slug === k; })[0]; return c ? c.type : (k === 'radio' ? 'radio' : 'tv'); }
+  function anyAir(type) { return Object.keys(onAir).some(function (k) { return onAir[k] && (!type || typeOf(k) === type); }); }
+  function loadChannels() {
+    return sb.from('live_channel_list').select('*').order('position').order('name').then(function (r) {
+      if (!r.error && r.data && r.data.length) channels = r.data;
+    }, function () {});
+  }
   var onAir = { radio: null, tv: null };          /* kind -> { room, timer } while broadcasting */
   var lkLoading = null;
   function loadLiveKit() {
@@ -495,7 +519,7 @@
     if (cur.stopMeter) cur.stopMeter();
     try { cur.room.disconnect(); } catch (e) { /* already gone */ }
     if (cur.mixer) { stopDeck(kind); cur.mixer.stop(); newDeckEl(kind); deckState[kind].ui(); }   /* the old player is tied to the closed mixer */
-    if (kind === 'tv' && tvComp && view !== 'tv') { tvComp.stop(); }   /* nobody is looking at the studio any more: release camera and screen */
+    if (typeOf(kind) === 'tv' && tvComp && view !== 'tv' && !anyAir('tv')) { tvComp.stop(); }   /* nobody is looking at the studio any more: release camera and screen */
     paintTabs();
     return sb.rpc('live_set', { p_kind: kind, p_title: null, p_on: false });
   }
@@ -617,7 +641,7 @@
         if (mixer && hooks.studio) mixer.addElement(hooks.studio.mediaEl());
         if (mixer) { var dk = deckFor(kind); mixer.musicMuted = !!dk.musMuted; mixer.padMuted = !!dk.padMuted; mixer.padVol = S.padVol == null ? 100 : S.padVol; mixer.micVol = S.micVol == null ? 100 : S.micVol; mixer.musicVol = S.musicVol == null ? 80 : S.musicVol; mixer.duck = S.duck !== false; mixer.set('muted', !!hooks.muted); }
         var steps = [mixer ? lp.publishTrack(new LK.LocalAudioTrack(mixer.track), { source: LK.Track.Source.Microphone }) : lp.setMicrophoneEnabled(true, mic)];
-        if (kind === 'tv') {
+        if (typeOf(kind) === 'tv') {
           var r = RES[S.res] || RES['720'];
           steps.push(S.source === 'studio' && hooks.studio ? lp.publishTrack(new LK.LocalVideoTrack(hooks.studio.track()), { source: LK.Track.Source.Camera }) : S.source === 'screen' ? lp.setScreenShareEnabled(true) : lp.setCameraEnabled(true, { deviceId: S.cam || undefined, resolution: { width: r[0], height: r[1], frameRate: 30 } }));
         }
@@ -632,7 +656,7 @@
       }).then(function () { return got; });
     });
   }
-  window.addEventListener('beforeunload', function (e) { if (onAir.radio || onAir.tv || nlDirty) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('beforeunload', function (e) { if (anyAir() || nlDirty) { e.preventDefault(); e.returnValue = ''; } });
 
 
   /* ---------------------------------------------------------------- jingle pads + channel strips (radio and TV) */
@@ -1008,8 +1032,8 @@
   }
 
   /* one studio window per channel: radio and TV have their own settings (saved in this browser) */
-  function showDash(kind) {
-    var isTv = kind === 'tv', S = loadSet(kind), stops = [];
+  function showDash(type, kind) {
+    var isTv = typeOf(kind) === 'tv', S = loadSet(kind), stops = [];
     var save = function () { saveSet(kind, S); };
     var parts = (cfg.site && cfg.site.partners) || [];
     var partnerSel = parts.length ? h('select', { onchange: function () { S.label = partnerSel.value; save(); } }, h('option', { value: '', text: 'Everywhere: main website and every partner embed' }), parts.map(function (p) { return h('option', { value: p.slug, text: 'Belongs to ' + p.name + ' (others see a link to it)' }); })) : null;
@@ -1076,6 +1100,7 @@
     go.onclick = function () {
       go.disabled = true;
       if (onAir[kind]) return stopLive(kind).then(function () { if (preview) preview.srcObject = null; toast('Off air'); paint(); go.disabled = false; });
+      if (isTv && anyAir('tv')) { toast('Another TV channel is on air from this browser. Stop it first (one camera feed per browser).', true); go.disabled = false; return; }
       if (testStop) { testStop(); testStop = null; test.textContent = 'Test microphone'; }
       status.textContent = 'Starting… allow the microphone' + (isTv ? (source.value === 'screen' ? ' and pick a screen' : ' and camera') : '') + ' if your browser asks.';
       var studioMode = isTv && S.source === 'studio', hooks = { preview: studioMode ? null : preview, onEnd: paint };
@@ -1128,14 +1153,14 @@
       var camBtn = h('button', { class: 'btn', type: 'button', text: comp.camStream ? 'Camera is on' : 'Turn on camera preview', onclick: function () {
         comp.start(S.cam).then(function () { camBtn.textContent = 'Camera is on'; camMsg.textContent = ''; fillDevices(); }).catch(function (e) { camMsg.className = 'hint err'; camMsg.textContent = 'Could not open the camera: ' + errText(e); });
       } });
-      if (res) res.addEventListener('change', function () { if (!onAir.tv) comp.resize(RES[res.value] || RES['720']); });
+      if (res) res.addEventListener('change', function () { if (!anyAir('tv')) comp.resize(RES[res.value] || RES['720']); });
       function key(e) {
         if (S.source !== 'studio' || e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName)) return;
         var tg = { f: 'fade', l: 'bug', t: 'tickOn' }[String(e.key).toLowerCase()];
         if (tg) { e.preventDefault(); var tb = box.querySelector('[data-toggle=' + tg + ']'); if (tb) tb.click(); return; }
         var sc = STUDIO_SCENES.filter(function (x) { return x[2] === e.key; })[0]; if (sc) { e.preventDefault(); setScene(sc[0]); }
       }
-      document.addEventListener('keydown', key); stops.push(function () { document.removeEventListener('keydown', key); if (!onAir.tv) comp.stop(); });
+      document.addEventListener('keydown', key); stops.push(function () { document.removeEventListener('keydown', key); if (!anyAir('tv')) comp.stop(); });
       paintScenes();
       var box = h('section', { class: 'panel wide studio' }, h('h3', { text: 'Studio: what the audience sees' }),
         h('div', { class: 'studiogrid' },
@@ -1150,8 +1175,16 @@
     fillDevices(); sync(); paint();
     dashCleanup = function () { stops.forEach(function (f) { f(); }); };
 
+    var mine = channels.filter(function (c) { return c.type === type; });
+    var chanSel = h('select', { 'aria-label': 'Channel', onchange: function () { try { localStorage.setItem('spark-chan-' + type, chanSel.value); } catch (e) {} location.hash = '#/' + type + '/' + chanSel.value; } },
+      mine.map(function (c) { return h('option', { value: c.slug, text: c.name + (c.topic ? ' (' + c.topic + ')' : '') + (onAir[c.slug] ? '  ● ON AIR' : '') }); }));
+    chanSel.value = kind;
+    var chanBar = h('div', { class: 'chanbar' }, h('label', { text: 'Channel' }), chanSel,
+      me.role === 'admin' ? h('a', { class: 'btn', href: '#/schedule', text: 'Add or edit channels' }) : null,
+      h('a', { class: 'btn', href: '#/schedule/' + kind, text: 'Open this channel’s schedule' }));
     return h('div', { class: 'dash' },
       h('div', { class: 'dashhead' }, h('h2', { text: isTv ? 'TV studio' : 'Radio studio' }), badge, timer),
+      chanBar,
       h('div', { class: 'dashgrid' },
         h('section', { class: 'panel' }, h('h3', { text: 'Broadcast' }),
           field('Title shown to visitors', title), partnerSel ? field('Where it plays', partnerSel, 'Visitors outside that partner see \u201cLive now on \u2026\u201d with a link instead of the player.') : null, source ? field('Source', source) : null,
@@ -1394,8 +1427,14 @@
             tick(V.newsletter, 'enabled', 'Show the sign-up box on the website (turn on after the email service is connected)'),
             field('Box title', bind(V.newsletter, 'title', 'text', { maxlength: 80, placeholder: 'Get the newsletter' })), field('Box text', bind(V.newsletter, 'blurb', 'text', { maxlength: 240 })),
             field('Email service', provSel, 'The service that actually delivers your newsletters. Pick one and fill in its details.'),
-            mailBoxes.resend, mailBoxes.mailjet, mailBoxes.smtp, mailNote, mailMsg, h('div', { class: 'btnrow' }, mailTest),
-            h('p', { class: 'hint', text: 'Write and send newsletters in the Newsletter tab. Sender name, email and the look of the emails are set there under Design.' })),
+            mailBoxes.resend, mailBoxes.mailjet, mailBoxes.smtp, mailNote,
+            h('h4', { text: 'Who the emails come from' }),
+            h('div', { class: 'row2' }, field('Sender name', bind(V.newsletter, 'from_name', 'text', { maxlength: 80, placeholder: V.site_name || 'Your site name' })),
+              field('Sender email', bind(V.newsletter, 'from_email', 'email', { maxlength: 160, placeholder: 'news@yourdomain.com' }), 'Must be an address your email service lets you send from.')),
+            field('Replies go to (optional)', bind(V.newsletter, 'reply_to', 'email', { maxlength: 160 })),
+            field('Your postal address', bind(V.newsletter, 'address', 'text', { maxlength: 300, placeholder: 'Street, city, country' }), 'Printed in the footer of every email. Many countries require it.'),
+            mailMsg, h('div', { class: 'btnrow' }, mailTest),
+            h('p', { class: 'hint', text: 'Press "Save and test connection" to save everything above in one go. Write and send newsletters in the Newsletter tab; colours and layout are under Newsletter > Design.' })),
           h('section', { class: 'panel' }, h('h3', { text: 'Instant website updates' }),
             h('p', { class: 'hint', text: gh.saved ? 'A token is saved. Publishing starts a website update by itself.' : 'No token saved yet, so the website only updates when you press "Update website" or at the next hourly rebuild.' }),
             gh.field, ghMsg,

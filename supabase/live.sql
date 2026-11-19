@@ -27,7 +27,7 @@ create or replace function public.live_set(p_kind text, p_title text, p_on boole
 returns void language plpgsql security definer set search_path = public as $$
 begin
   if public.editor_role() not in ('admin', 'editor') then raise exception 'Only editors and admins can go live'; end if;
-  if p_kind not in ('radio', 'tv') then raise exception 'Unknown channel'; end if;
+  if not exists (select 1 from public.live_channels where kind = p_kind) then raise exception 'Unknown channel'; end if;
   update public.live_channels set
     on_air = p_on, title = case when p_on then nullif(trim(p_title), '') else title end,
     label = case when p_on then nullif(trim(p_label), '') else label end,

@@ -30,7 +30,7 @@ window.addEventListener('error', function (e) { window.__sparkErrors.push(e.mess
           .then(function (rows) { ll.classList.toggle('onair', Array.isArray(rows) && rows.length > 0); })
           .catch(function () {});
       };
-      poll(); setInterval(poll, 30000);
+      poll(); setInterval(function () { if (!document.hidden) poll(); }, 30000);
     }
   } catch (e) {}
 
@@ -202,6 +202,8 @@ window.addEventListener('error', function (e) { window.__sparkErrors.push(e.mess
     if (note) note.hidden = !isSafari;
   }
 })();
+
+document.addEventListener('visibilitychange', function () { document.documentElement.classList.toggle('tabhid', document.hidden); });
 
 /* add ?debug to any page address to see what the page is doing on your device */
 (function () {

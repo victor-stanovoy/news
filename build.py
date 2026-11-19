@@ -718,8 +718,8 @@ class Site:
             return (f'<div class="ph {cls}" style="--h:{h}" aria-hidden="true">'
                     f'<span>{esc(a.category[:1].upper())}</span></div>')
         return (f'<img class="{cls}" src="{esc(src)}" alt="" '
-                f'style="object-position:{a.fx}% {a.fy}%" referrerpolicy="no-referrer" onerror="this.remove()"'
-                f'{" loading=lazy" if lazy else ""}>')
+                f'style="object-position:{a.fx}% {a.fy}%" referrerpolicy="no-referrer" onerror="this.remove()" decoding=async'
+                f'{" loading=lazy fetchpriority=low" if lazy else ""}>')
 
     # -- chrome
     def head(self, title, root, desc="", image="", path="", kind="website", alts=None, ld=None):
@@ -901,16 +901,16 @@ class Site:
               '<div class="poster"><span class="ps">Off air</span><span class="pm">Live TV is not broadcasting right now.</span></div>'
               '<span class="lstate off">Off air</span><span class="ltime" hidden></span></div>'
               + ctl.format(verb="Watch live", extra='<button class="lfs" type="button" aria-label="Full screen" hidden>&#x26F6;</button>') +
-              '<h2 class="ltitle">Live TV</h2><p class="lsub"></p><p class="lmsg" role="status" aria-live="polite"></p></section>')
+              '<p class="ltopic" hidden></p><h2 class="ltitle">Live TV</h2><p class="lsub"></p><ol class="lnext" hidden></ol><p class="lmsg" role="status" aria-live="polite"></p></section>')
         radio = ('<section class="livecard radc" data-kind="radio" aria-label="Live radio"><div class="rtop"><span class="lstate off">Off air</span><span class="ltime" hidden></span></div>'
                  '<div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>'
-                 '<audio class="lmedia" hidden></audio><h2 class="ltitle">Live radio</h2><p class="lnow" hidden></p><p class="lsub">Live radio is not broadcasting right now.</p>'
+                 '<audio class="lmedia" hidden></audio><p class="ltopic" hidden></p><h2 class="ltitle">Live radio</h2><p class="lnow" hidden></p><p class="lsub">Live radio is not broadcasting right now.</p><ol class="lnext" hidden></ol>'
                  + ctl.format(verb="Listen live", extra="") + '<p class="lmsg" role="status" aria-live="polite"></p></section>')
         more = "".join(self.card(a, "../", "m") for a in self.arts[:3])
         more = (f'<section class="lvmore"><h2 id="lvmoreh">Meanwhile, the latest stories</h2><div class="grid3">{more}</div></section>' if more else "")
         body = (f'<div class="wrap livepage"><div class="lvhead"><h1>Live</h1><p class="lead">Live TV and radio from {esc(self.cfg["site_name"])}. '
                 f'Anyone can listen and watch, no account needed.</p></div>'
-                f'<div class="livegrid" data-live="none">{tv}{radio}</div>{more}'
+                f'<div class="livegrid" data-live="none">{tv}{radio}</div><template id="tpl-tv">{tv}</template><template id="tpl-radio">{radio}</template>{more}'
                 f'<script id="spark-live-config" type="application/json">{conf}</script>'
                 f'<script src="../assets/live.js?v={asset_ver("live.js")}" defer></script></div>')
         return self.page("Live", body, "../", active="live")
@@ -1367,7 +1367,7 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
         site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
                      "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners")
         conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys},
-                           "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
+                           "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js"), "schedule": asset_ver("schedule-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
                 .replace("{{CSS_VER}}", asset_ver("editor.css")).replace("{{JS_VER}}", asset_ver("editor.js")))
         w("editor/index.html", page)

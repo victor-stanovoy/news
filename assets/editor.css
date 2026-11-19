@@ -258,3 +258,34 @@ body.focusing{overflow:hidden}
   body.printing-badges{background:#fff!important}
   @page{margin:10mm}
 }
+
+/* ---- channels and schedule ---- */
+.chanbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 14px}.chanbar label{font-weight:700}.chanbar select{min-width:220px}
+.sched .schedtop{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sched .schedgrid{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:16px;align-items:start}
+.sched .lib{max-height:calc(100vh - 220px);overflow:auto}
+.sched .plist{display:grid;gap:8px;margin-top:10px}
+.sched .pcard{display:flex;gap:8px;align-items:center;justify-content:space-between;border:1px solid var(--line,#d5d8e2);border-left:6px solid #888;padding:8px 10px;background:#fff;cursor:grab}
+.sched .pcard.on{outline:2px solid #e8003d}.sched .pcard .ptxt{min-width:0;display:flex;flex-direction:column}
+.sched .pcard b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sched .pcard small{color:#666}
+.sched .pbtn{display:flex;gap:6px;flex:none}
+.sched .chips2{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.sched .chip2{font:inherit;font-size:13px;padding:4px 10px;border:2px solid #cfd2dc;background:#fff;cursor:pointer}.sched .chip2.on{background:#12104a;color:#fff}
+.sched .addprog{border:1px dashed #9aa0b4;padding:8px 10px;margin-bottom:10px}.sched .addprog summary{cursor:pointer;font-weight:700}
+.sched .seg{display:flex;gap:6px;margin:8px 0}.sched .seg .btn.on{background:#12104a;color:#fff}
+.sched .tl{height:calc(100vh - 330px);min-height:420px;overflow:auto;border:1px solid #cfd2dc;background:#fff;position:relative}
+.sched .tlin{position:relative;margin-left:54px;cursor:crosshair}
+.sched .hr{position:absolute;left:-54px;right:0;border-top:1px solid #e3e5ee;height:0}.sched .hr span{position:absolute;left:6px;top:2px;font-size:11px;color:#777}
+.sched .sitem{position:absolute;left:4px;right:12px;color:#fff;padding:3px 8px;overflow:hidden;cursor:grab;border-left:4px solid rgba(255,255,255,.55);box-sizing:border-box;display:flex;flex-direction:column;font-size:13px;line-height:1.25}
+.sched .sitem small{opacity:.85}.sched .sitem.on{outline:3px solid #e8003d;z-index:3}.sched .sitem:focus-visible{outline:3px solid #e8003d}
+.sched .nowline{position:absolute;left:-54px;right:0;border-top:2px solid #e8003d;z-index:4;pointer-events:none}.sched .nowline span{background:#e8003d;color:#fff;font-size:10px;padding:0 4px;position:absolute;left:4px;top:-9px}
+.sched .slot{position:absolute;left:0;right:0;border-top:2px dashed #12104a;z-index:2;pointer-events:none}.sched .slot span{background:#12104a;color:#fff;font-size:11px;padding:1px 6px;position:absolute;right:0;top:-1px}
+.sched .ghost{position:absolute;left:4px;right:12px;height:28px;border:2px dashed #12104a;background:rgba(18,16,74,.12);font-size:12px;padding:2px 6px;z-index:5;pointer-events:none}
+.sched .schedtools{margin-bottom:10px}.sched .selbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.sched .selbar .sep{flex-basis:12px}.sched .chpanel{margin-bottom:16px}.sched .chrow{display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid #eceef4}.sched .chrow small{flex:1;color:#666}
+@media (max-width:900px){.sched .schedgrid{grid-template-columns:1fr}.sched .lib{max-height:none}}
+.sched select,.sched input[type=date],.sched input[type=time],.sched input[type=search]{width:auto;max-width:100%}
+.sched .lib input[type=search]{width:100%}
+.sched .schedtop select{min-width:200px}
+.sched .selbar select{min-width:130px}
+.sched .dashhead{flex-wrap:wrap;gap:10px 16px}
+.sched .selbar>span{white-space:nowrap}

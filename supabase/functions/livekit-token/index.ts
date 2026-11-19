@@ -52,7 +52,7 @@ export async function handle(req: Request): Promise<Response> {
   let input: { kind?: string; mode?: string };
   try { input = await req.json(); } catch { return reply({ error: "Bad request" }, 400); }
   const kind = input.kind, mode = input.mode;
-  if (mode !== "check" && kind !== "radio" && kind !== "tv") return reply({ error: "Unknown channel" }, 400);
+  if (mode !== "check" && !/^[a-z0-9][a-z0-9-]{1,30}$/.test(String(kind || ""))) return reply({ error: "Unknown channel" }, 400);
   if (mode !== "publish" && mode !== "watch" && mode !== "check") return reply({ error: "Unknown mode" }, 400);
 
   const apikey = req.headers.get("apikey") ?? "";

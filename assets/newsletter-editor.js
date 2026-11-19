@@ -48,7 +48,10 @@
     function saveDesign() {
       return sb.from('site_settings').select('data').eq('id', 1).maybeSingle().then(function (r) {
         var data = (r.data && r.data.data) || {};
-        data.newsletter = Object.assign({}, data.newsletter || {}, design);
+        var old = data.newsletter || {}, keep = {};
+        ['from_name', 'from_email', 'reply_to', 'address'].forEach(function (k) { if (old[k] !== undefined) keep[k] = old[k]; });   /* these are edited in Settings, never overwritten from here */
+        data.newsletter = Object.assign({}, old, design, keep);
+        Object.assign(design, keep);
         return sb.rpc('settings_save', { p_data: data });
       });
     }
@@ -308,7 +311,6 @@
       });
       var msg = h('p', { class: 'hint' });
       var saveBtn = h('button', { class: 'btn primary', type: 'button', text: 'Save design', disabled: dis, onclick: function () {
-        if (D.from_email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(D.from_email)) { msg.className = 'hint err'; msg.textContent = 'The sender email does not look right.'; return; }
         saveBtn.disabled = true;
         saveDesign().then(function (r) { saveBtn.disabled = false; if (r.error) { msg.className = 'hint err'; msg.textContent = errText(r.error); } else { msg.className = 'hint ok'; msg.textContent = 'Saved. New newsletters use this design.'; toast('Design saved'); refreshPreview(); } });
       } });
@@ -323,8 +325,8 @@
           h('div', { class: 'row2' }, txt('width', 'Email width (480 to 700 px)', '', 'number'), txt('radius', 'Corner roundness (0 to 28)', '', 'number')),
           h('h3', { text: 'Header' }), txt('logo_url', 'Logo picture address', 'A web address of a PNG or JPG, about 40 px tall. Leave empty to show only the name.', 'url'),
           (function () { var c = check('Show the site name next to the logo', D.show_name !== false, function () { D.show_name = c.input.checked; redraw(); }); c.input.disabled = dis; return c.box; })(), txt('tagline', 'Line under the name'),
-          h('h3', { text: 'Footer' }), area('footer_text', 'Footer text', 'For example a short sentence about you.'), area('address', 'Postal address', 'Many countries require a postal address in newsletters.'), txt('unsub_text', 'Unsubscribe link wording'), h('div', { class: 'socials' }, soc),
-          h('h3', { text: 'Sender' }), txt('from_name', 'Sender name'), txt('from_email', 'Sender email', 'Must be an address your email service lets you send from (a verified domain or sender, or your own mailbox).', 'email'), txt('reply_to', 'Replies go to (optional)', '', 'email'),
+          h('h3', { text: 'Footer' }), area('footer_text', 'Footer text', 'For example a short sentence about you.'), txt('unsub_text', 'Unsubscribe link wording'), h('div', { class: 'socials' }, soc),
+          h('p', { class: 'hint', text: 'The sender name, sender email and postal address are in Settings > Newsletter, together with the email service.' }), h('a', { class: 'btn', href: '#/settings', text: 'Open sender settings' }),
           msg, h('div', { class: 'btnrow' }, saveBtn)),
         h('div', { class: 'nlprev' }, h('div', { class: 'prevhead' }, h('b', { text: 'Live preview' })), frame)));
       setDoc(frame, SE.preview(sample, D, opts()));
@@ -355,10 +357,16 @@
 
     /* ---------------------------------------------------------------- tabs */
     var TABS = [['compose', 'Compose'], ['subs', 'Subscribers'], ['design', 'Design'], ['sent', 'Drafts & sent']];
+    function senderWarn() {
+      if (design.from_email && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(design.from_email)) return null;
+      return h('div', { class: 'msg err' }, 'Before you can send: enter the sender email in ', h('a', { href: '#/settings', text: 'Settings > Newsletter' }), '.');
+    }
     function go(v) {
       view = v;
       tabs.querySelectorAll('.stab').forEach(function (b) { b.classList.toggle('on', b.dataset.v === v); });
+      var warn = senderWarn();
       if (v === 'compose') composeView(); else if (v === 'subs') { subsView(); loadSubs(); } else if (v === 'design') designView(); else sentView();
+      if (warn && v !== 'design') body.insertBefore(warn, body.firstChild);
     }
     tabs.replaceChildren.apply(tabs, TABS.map(function (t) { return h('button', { class: 'stab', type: 'button', 'data-v': t[0], text: t[1], onclick: function () { go(t[0]); } }); }));
     root.replaceChildren(h('div', { class: 'dashhead' }, h('h2', { text: 'Newsletter' })), tabs, body);
