@@ -71,6 +71,10 @@ DEFAULT_CONFIG = {
         "default_image": "",        # picture used in social shares when an article has none (full https:// address)
         "news_sitemap": True,       # also write news-sitemap.xml for Google News (articles of the last 2 days)
         "block_ai_crawlers": False, # ask AI training crawlers (GPTBot, CCBot, ...) not to read the site
+        "keywords": "",             # site-wide keywords, comma separated (meta keywords + structured data on every page)
+        "logo": "",                 # publisher logo for search results, full https:// address (empty = assets/logo.png)
+        "same_as": [],              # your official profiles (Instagram, LinkedIn, X ...), one https:// address each
+        "locale": "",               # e.g. en_GB or de_AT, used for og:locale (empty = from the site language)
     },
     "privacy": {
         "hide_authors": False,      # leave out the names of authors and editors on every published page, feed and data file
@@ -390,12 +394,17 @@ def fetch_db(cfg):
         return [], set()
     rows, start, page = [], 0, 1000
     cols_nolabel = "id,slug,title,subtitle,content,content_type,category,image_url,cover_focus_x,cover_focus_y,additional_images,image_layout,reporter_video_url,status,taken_down,is_breaking,breaking_description,published_at,scheduled_publish_at,is_ai_translated,is_featured,views,is_live_update,live_update_label,live_updates,citations,series_id,series_order,translations,created_at,updated_at"        # never ask for created_by / updated_by: nothing public needs them
-    cols = cols_nolabel + ",partner_label,partner_mode"            # needs supabase/partners.sql; older databases work without it
+    # optional columns: partners.sql adds the first two, seo.sql the next three. Older databases work without them.
+    tiers = [cols_nolabel + ",partner_label,partner_mode,seo_title,seo_description,seo_keywords",
+             cols_nolabel + ",partner_label,partner_mode",
+             cols_nolabel]
+    cols = tiers[0]
     while True:
         chunk = db_get(url, key, "/rest/v1/articles?select=" + cols + "&order=id", optional=(cols != cols_nolabel),
                        extra={"Range-Unit": "items", "Range": f"{start}-{start + page - 1}"})
         if chunk is None:
-            cols = cols_nolabel
+            tiers = tiers[1:] if len(tiers) > 1 else tiers
+            cols = tiers[0]
             continue
         rows += chunk or []
         if not chunk or len(chunk) < page:
@@ -459,6 +468,18 @@ def _str(v, n, default=""):
     return v.strip()[:n] if isinstance(v, str) else default
 
 
+def clean_keywords(v, limit=20):
+    """Keywords typed as 'a, b, c' (or one per line) -> a short list without duplicates."""
+    if isinstance(v, list):
+        v = ",".join(x for x in v if isinstance(x, str))
+    out, seen = [], set()
+    for k in re.split(r"[,\n;]+", v if isinstance(v, str) else ""):
+        k = re.sub(r"\s+", " ", k).strip()[:60]
+        if k and k.lower() not in seen:
+            seen.add(k.lower()); out.append(k)
+    return out[:limit]
+
+
 def clean_settings(d):
     """Settings saved in the editor, reduced to known keys with safe types. Anything else is ignored."""
     out = {}
@@ -486,6 +507,14 @@ def clean_settings(d):
         if "news_sitemap" in s: o["news_sitemap"] = bool(s["news_sitemap"])
         for k, n in (("title_suffix", 60), ("default_image", 300), ("twitter_site", 40), ("default_description", 200), ("google_verification", 120), ("bing_verification", 120)):
             if isinstance(s.get(k), str): o[k] = _str(s[k], n)
+        if isinstance(s.get("keywords"), str):
+            o["keywords"] = ", ".join(clean_keywords(s["keywords"], 30))[:600]
+        if isinstance(s.get("logo"), str):
+            o["logo"] = s["logo"].strip()[:300] if re.match(r"^https://[^\s\"'<>]+$", s["logo"].strip()) else ""
+        if isinstance(s.get("same_as"), list):
+            o["same_as"] = [x.strip()[:300] for x in s["same_as"] if isinstance(x, str) and re.match(r"^https://[^\s\"'<>]+$", x.strip())][:12]
+        if isinstance(s.get("locale"), str):
+            o["locale"] = s["locale"].strip()[:10] if re.match(r"^[a-z]{2}([_-][A-Za-z]{2})?$", s["locale"].strip()) else ""
         out["seo"] = o
     if isinstance(d.get("privacy"), dict):
         s = d["privacy"]; o = {}
@@ -638,6 +667,9 @@ def load_articles(cfg, now):
             for lang, v in tdata.items():
                 if isinstance(v, dict) and (v.get("content") or v.get("title")):
                     a.translations[lang.lower()] = v
+        a.seo_title = g("seo_title")[:70]
+        a.seo_description = g("seo_description")[:300]
+        a.seo_keywords = clean_keywords(g("seo_keywords"), 15)
         a.label = g("partner_label").lower()
         a.pmode = g("partner_mode").lower()       # redirect | hide | show (empty = the partner's default)
         a.series_id = g("series_id")
@@ -722,11 +754,11 @@ class Site:
                 f'{" loading=lazy fetchpriority=low" if lazy else ""}>')
 
     # -- chrome
-    def head(self, title, root, desc="", image="", path="", kind="website", alts=None, ld=None):
+    def head(self, title, root, desc="", image="", path="", kind="website", alts=None, ld=None, seo_title="", keywords=None):
         cfg = self.cfg
         seo = cfg["seo"]
         suf = seo.get("title_suffix")
-        full = (title + (suf if suf else f" | {cfg['site_name']}")) if title else f"{cfg['site_name']} – {cfg['tagline']}"
+        full = ((seo_title or title) + (suf if suf else f" | {cfg['site_name']}")) if title else f"{cfg['site_name']} – {cfg['tagline']}"
         desc = desc or seo.get("default_description") or cfg["tagline"]
         base = cfg["base_url"].rstrip("/")
         og = f'<meta property="og:title" content="{esc(title or cfg["site_name"])}">' \
@@ -745,6 +777,12 @@ class Site:
         if dimg and not (image and image.startswith("http")):
             og += f'<meta property="og:image" content="{esc(dimg)}"><meta name="twitter:card" content="summary_large_image">'
         og += f'<link rel="alternate" type="application/rss+xml" title="{esc(cfg["site_name"])}" href="{root}feed.xml">'
+        kws = clean_keywords(list(keywords or []) + clean_keywords(seo.get("keywords", ""), 30), 25)
+        if kws and seo.get("indexing"):
+            og += f'<meta name="keywords" content="{esc(", ".join(kws))}">'
+        loc = seo.get("locale") or {"en": "en_GB", "de": "de_AT"}.get(cfg["language"][:2], "")
+        if loc:
+            og += f'<meta property="og:locale" content="{esc(loc.replace("-", "_"))}">'
         return (f'<!doctype html><html lang="{esc(cfg["language"])}"><head><meta charset="utf-8">'
                 f'<meta name="viewport" content="width=device-width,initial-scale=1">{self.seo_tags(ld)}'
                 f'<meta name="color-scheme" content="light dark">'
@@ -1006,7 +1044,9 @@ class Site:
         if title == "" and not kw.get("ld"):
             base = self.cfg["base_url"].rstrip("/")
             kw["ld"] = {"@context": "https://schema.org", "@type": "NewsMediaOrganization", "name": self.cfg["site_name"], "url": base or None,
-                        "logo": f"{base}/assets/logo.png" if base else None, "description": self.cfg["tagline"]}
+                        "logo": (self.cfg["seo"].get("logo") or f"{base}/assets/logo.png") if base else None, "description": self.cfg["tagline"],
+                        "sameAs": self.cfg["seo"].get("same_as") or None,
+                        "keywords": ", ".join(clean_keywords(self.cfg["seo"].get("keywords", ""), 30)) or None}
             kw["ld"] = {k: v for k, v in kw["ld"].items() if v}
             if base:
                 kw["ld"] = [kw["ld"], {"@context": "https://schema.org", "@type": "WebSite", "name": self.cfg["site_name"], "url": base + "/",
@@ -1095,7 +1135,7 @@ class Site:
         body = (f'<div class="wrap"><h1 class="pagetitle">{esc(c["name"])}</h1>'
                 f'<p class="count">{len(items)} article{"s" if len(items) != 1 else ""}</p>'
                 f'<div class="grid3">{"".join(self.card(a, root) for a in items)}</div></div>')
-        return self.page(c["name"], body, root, active=slug, desc=f"Latest {c['name']} stories", path=f"c/{slug}.html")
+        return self.page(c["name"], body, root, active=slug, desc=f"Latest {c['name']} stories", path=f"c/{slug}.html", keywords=[c["name"]])
 
     def search_page(self):
         root = ""
@@ -1228,13 +1268,19 @@ class Site:
         if related:
             art += (f'<section class="wrap rel"><h2 class="sec">More in {esc(a.category)}</h2>'
                     f'<div class="grid3">{"".join(self.card(x, root) for x in related)}</div></section>')
-        desc = (strip_tags(subtitle or body_html)[:160] if tr else a.excerpt)
+        desc = (strip_tags(subtitle or body_html)[:160] if tr else (a.seo_description or a.excerpt))
+        kws = clean_keywords(list(a.seo_keywords) + [a.category], 15)
         alts = [("x-default", f"a/{a.slug}.html")] + [(l, f"a/{a.slug}.{l}.html") for l in a.translations] if a.translations else None
         base = self.cfg["base_url"].rstrip("/")
         ld = {"@context": "https://schema.org", "@type": "NewsArticle", "headline": title[:110], "datePublished": a.date.isoformat(),
               "description": desc, "author": ({"@type": "Organization", "name": self.cfg["privacy"].get("byline") or self.cfg["site_name"]} if self.hide_names() or not a.author
                                    else {"@type": "Person", "name": a.author}),
               "publisher": {"@type": "Organization", "name": self.cfg["site_name"]}}
+        if self.cfg["base_url"]:
+            ld["publisher"]["logo"] = {"@type": "ImageObject", "url": self.cfg["seo"].get("logo") or self.cfg["base_url"].rstrip("/") + "/assets/logo.png"}
+        if a.updated: ld["dateModified"] = a.updated.isoformat()
+        ld["keywords"] = ", ".join(clean_keywords(kws + clean_keywords(self.cfg["seo"].get("keywords", ""), 30), 25))
+        ld["articleSection"] = a.category
         if src and src.startswith("http"): ld["image"] = [src]
         if base: ld["mainEntityOfPage"] = f"{base}/a/{fname}.html"
         if base:
@@ -1243,7 +1289,7 @@ class Site:
                 {"@type": "ListItem", "position": 2, "name": a.category, "item": f"{base}/c/{a.cat_slug}.html"},
                 {"@type": "ListItem", "position": 3, "name": title[:110]}]}]
         return self.page(title, art, root, active=a.cat_slug, desc=desc, image=src, kind="article",
-                         path=f"a/{fname}.html", alts=alts, ld=ld)
+                         path=f"a/{fname}.html", alts=alts, ld=ld, keywords=kws, seo_title="" if tr else a.seo_title)
 
     def embed_page(self, a):
         h = a.raw_content

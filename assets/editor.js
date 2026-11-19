@@ -1408,6 +1408,14 @@
             field('Default share picture (https address)', bind(V.seo, 'default_image', 'text', { maxlength: 300, placeholder: 'https://…/share.png' })),
             tick(V.seo, 'news_sitemap', 'Write a Google News sitemap (articles of the last 2 days)'),
             field('Default search description', bind(V.seo, 'default_description', 'text', { maxlength: 200, placeholder: 'Used when a page has no summary' })),
+            field('Site keywords', bind(V.seo, 'keywords', 'text', { maxlength: 600, placeholder: 'student journalism, Vienna, international school news' }),
+              'Separate with commas. Added to every page (meta keywords and structured data). Each article adds its own keywords and its section name. Google ignores the keywords tag itself, but Bing and others read it, and the structured data helps everywhere.'),
+            h('div', { class: 'row2' }, field('Publisher logo (https address)', bind(V.seo, 'logo', 'text', { maxlength: 300, placeholder: 'empty = the SparkNews logo' })),
+              field('Language / region', bind(V.seo, 'locale', 'text', { maxlength: 10, placeholder: 'en_GB or de_AT' }))),
+            h('div', { class: 'field' }, h('label', { text: 'Official profiles (Instagram, LinkedIn, X, ...)' }),
+              (function () { var ta = h('textarea', { rows: '3', placeholder: 'One https:// address per line', 'aria-label': 'Official profiles' }); ta.value = (V.seo.same_as || []).join('\n');
+                ta.addEventListener('input', function () { V.seo.same_as = ta.value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean); mark(); }); return ta; })(),
+              h('small', { class: 'hint', text: 'Tells search engines these accounts belong to the same publisher (structured data, sameAs).' })),
             h('div', { class: 'row2' }, field('X / Twitter handle', bind(V.seo, 'twitter_site', 'text', { maxlength: 40, placeholder: '@yourname' })),
               field('Google Search Console code', bind(V.seo, 'google_verification', 'text', { maxlength: 120 }))),
             field('Bing Webmaster code', bind(V.seo, 'bing_verification', 'text', { maxlength: 120 })),
@@ -1627,6 +1635,15 @@
     f.layout = h('select', { onchange: mark }, h('option', { value: 'grid', text: 'Grid' }), h('option', { value: 'carousel', text: 'Carousel' })); f.layout.value = a.image_layout || 'grid';
     f.video = h('input', { type: 'url', value: a.reporter_video_url || '', placeholder: 'YouTube link', oninput: mark });
     f.citations = h('textarea', { class: 'code', placeholder: 'Sources and credits. Separate entries with a blank line.', oninput: mark }); f.citations.value = a.citations || '';
+    function counter(input, max) { var c = h('small', { class: 'hint' }); function u() { var n = input.value.length; c.textContent = n + ' / ' + max + (n > max ? ' (may be cut off in search results)' : ''); }
+      input.addEventListener('input', u); u(); return c; }
+    f.seoTitle = h('input', { type: 'text', value: a.seo_title || '', maxlength: 70, placeholder: 'Empty = the headline', oninput: mark });
+    f.seoDesc = h('textarea', { rows: '3', maxlength: 300, placeholder: 'Empty = the standfirst or the first lines of the article', oninput: mark }); f.seoDesc.value = a.seo_description || '';
+    f.seoKw = h('input', { type: 'text', value: a.seo_keywords || '', maxlength: 300, placeholder: 'e.g. climate march, Vienna, student council', oninput: mark });
+    var seoPanel = h('div', { class: 'panel' }, h('h3', { text: 'Search engines (SEO)' }),
+      field('Search title', f.seoTitle), counter(f.seoTitle, 60),
+      field('Search description', f.seoDesc), counter(f.seoDesc, 160),
+      field('Keywords', f.seoKw), h('small', { class: 'hint', text: 'Separate with commas. The section name is added automatically.' }));
     f.seriesId = h('input', { type: 'text', value: a.series_id || '', oninput: mark }); f.seriesOrder = h('input', { type: 'number', value: a.series_order == null ? '' : a.series_order, oninput: mark });
     var aiT = check('Translations were made automatically', a.is_ai_translated, mark); f.aiTr = aiT.input;
     f.where = whereSelect(a, mark);
@@ -1681,6 +1698,7 @@
             h('div', { class: 'up', style: 'margin:-6px 0 12px' }, h('button', { class: 'btn', type: 'button', text: 'Upload & add', onclick: function () { pickImage(function (u) { f.extra.value = (f.extra.value.trim() ? f.extra.value.trim() + '\n' : '') + u; mark(); }); } })),
             field('Extra images layout', f.layout), field('Video', f.video), field('Sources & credits', f.citations),
             h('div', { class: 'row2' }, field('Series ID', f.seriesId), field('Series order', f.seriesOrder)), live.box, liveBox)),
+          seoPanel,
           h('div', { class: 'panel' }, h('h3', { text: 'Translations' }), aiT.box, trBox, trSel),
           delBtn ? h('div', { class: 'panel' }, delBtn) : null)));
     /* the datalist must live in the document for the Section field */
@@ -1703,6 +1721,11 @@
         live_updates: [].slice.call(liveRows.children).map(function (r) { return { timestamp: fromLocal(r._ts.value) || new Date().toISOString(), text: r._tx.value.trim() }; }).filter(function (u) { return u.text; }),
         status: f.status.value, scheduled_publish_at: fromLocal(f.scheduled.value), published_at: fromLocal(f.published.value)
       };
+      /* SEO columns come from supabase/seo.sql; older databases do not have them, so only send them when they exist or are used */
+      var seoUsed = f.seoTitle.value.trim() || f.seoDesc.value.trim() || f.seoKw.value.trim();
+      if (seoUsed || 'seo_title' in a) {
+        d.seo_title = f.seoTitle.value.trim() || null; d.seo_description = f.seoDesc.value.trim() || null; d.seo_keywords = f.seoKw.value.trim() || null;
+      }
       var tr = {};
       Object.keys(trData).forEach(function (l) {
         var v = trData[l], o = { title: v.t.value.trim(), subtitle: v.s.value.trim(), content: v.c.value.trim() };
