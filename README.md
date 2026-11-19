@@ -316,3 +316,13 @@ Admins get a **Badges** tab. Add a person (name, job title, employee ID, optiona
 * **Print this badge** / **Print all** open the print dialog with 85.6 × 54 mm cards, two per row.
 * Scanning the QR opens `/badge/` on your website, which shows the person's name, title, ID and photo and says the badge is valid. **Switch off** makes a lost badge stop verifying; **New link** replaces the secret code.
 * One-time setup: run `supabase/badges.sql` in the Supabase SQL Editor. The page is not built in GDPR lockdown mode.
+
+## TV and radio channels, programme library and schedule
+
+One-time setup: run `supabase/channels.sql` in the Supabase SQL Editor (run `supabase/live.sql` again first if you changed it), and **redeploy the `livekit-token` function** (paste the new `supabase/functions/livekit-token/index.ts` over the old one, Verify JWT stays off).
+
+* **Schedule tab > Channels…** (admins): add as many TV and radio channels as you like, each with a name, topic and one-line description. "Live TV" and "Live radio" stay as your first two.
+* **TV studio / Radio studio** have a channel picker on top: go live on any channel. One TV channel at a time per browser.
+* **Programme library**: add a YouTube link (title and length are found automatically; the video owner must allow embedding) or upload a video or audio file up to 50 MB. Give each a topic.
+* **Planner**: drag programmes onto the day, or press Add (it goes after the last programme). Overlaps are pushed to the next free time. Click a block to change its time, repeat it tomorrow or remove it. *Fill the rest of the day* repeats programmes of one topic, *Copy this day* repeats a day for up to a week.
+* Visitors see every channel on the Live page. When nobody is live a channel plays what the schedule says, in sync for everyone. A live broadcast always takes over.
