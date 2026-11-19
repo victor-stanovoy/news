@@ -1509,6 +1509,9 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     (out / "a").mkdir(parents=True)
     (out / "c").mkdir()
     shutil.copytree(ASSETS_DIR, out / "assets")
+    for f in ROOT.glob("google*.html"):      # Google Search Console "HTML file" ownership proof: must sit at the top of the site
+        if re.fullmatch(r"google[0-9a-f]{10,32}\.html", f.name):
+            shutil.copy(f, out / f.name)
     img_dir = ARTICLES_DIR / "images"
     if img_dir.exists():
         shutil.copytree(img_dir, out / "images")
