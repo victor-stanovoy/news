@@ -926,7 +926,7 @@ class Site:
                 out += f"\nUser-agent: {bot}\nDisallow: /\n"
         if base:
             out += f"\nSitemap: {base}/sitemap.xml\n"
-            if seo.get("news_sitemap"):
+            if seo.get("news_sitemap") and self.news_sitemap():
                 out += f"Sitemap: {base}/news-sitemap.xml\n"
         return out
 
@@ -1464,6 +1464,8 @@ class Site:
             f"<news:language>{esc(self.cfg['language'][:2])}</news:language></news:publication>"
             f"<news:publication_date>{a.date.strftime('%Y-%m-%dT%H:%M:%S+00:00')}</news:publication_date><news:title>{esc(a.title)}</news:title></news:news></url>"
             for a in self.arts if not a.is_embed and a.date >= cutoff and a.slug not in skip)
+        if not rows:       # Google rejects an empty news sitemap ("couldn't fetch"), so write none until there is a fresh story
+            return None
         return ('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
                 'xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">' + rows + "</urlset>")
 
