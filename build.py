@@ -774,9 +774,157 @@ def load_articles(cfg, now):
 
 
 # --------------------------------------------------------------------------- rendering
+# ---- share previews (the picture shown when a link is pasted into WhatsApp, Slack, X, Facebook, iMessage...) --------------
+# Home and section pages get a collage of their newest stories, other pages a branded card. Needs Pillow (the workflow installs it);
+# without it everything simply keeps the default picture.
+_FONT_FILES = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+               "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"]
+_COVERS = {}
+_COVER_DEADLINE = [0.0]       # the whole picture-fetching step gets 75 seconds at most, however slow other sites are
+
+
+def name_variants(name):
+    """All the ways people write a site name: SparkNews, Spark News, sparknews, Spark-News, SparkNews(TM)..."""
+    base = re.sub(r"[™®©]", "", name).strip()
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", base)
+    out = []
+    for v in (base, spaced, spaced.replace(" ", "-"), base.lower(), spaced.lower(), base.upper(), spaced.upper(), spaced.title(), base + "™", spaced + "™"):
+        if v and v not in out: out.append(v)
+    return out
+
+
+def _fetch_cover(url):
+    from PIL import Image
+    import io
+    if url in _COVERS: return _COVERS[url]
+    im = None
+    if os.environ.get("SPARK_PREVIEW_OFFLINE") or (_COVER_DEADLINE[0] and time.monotonic() > _COVER_DEADLINE[0]):
+        _COVERS[url] = None; return None
+    try:
+        if url.startswith("data:image"):
+            import base64
+            im = Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1])))
+        else:
+            rq = urllib.request.Request(url, headers={"User-Agent": "SparkNewsBuild/1.0 (+preview images)"})
+            with urllib.request.urlopen(rq, timeout=6) as r:
+                data = r.read(8_000_000)
+            im = Image.open(io.BytesIO(data))
+        im = im.convert("RGB"); im.thumbnail((1400, 1400))
+    except Exception:
+        im = None
+    _COVERS[url] = im
+    return im
+
+
+def _can_draw(text):
+    return all(ord(c) < 0x530 or 0x2000 <= ord(c) <= 0x206F or c in "™€" for c in text)
+
+
+def make_preview(dest, title, kicker, cover_urls, brand, tagline=""):
+    """Write a 1200x630 JPEG. Returns True when written."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return False
+    W, H = 1200, 630
+    def font(sz):
+        for f in _FONT_FILES:
+            try: return ImageFont.truetype(f, sz)
+            except Exception: pass
+        try: return ImageFont.load_default(sz)
+        except Exception: return ImageFont.load_default()
+    img = Image.new("RGB", (W, H), (17, 12, 74))
+    covers = [c for c in (_fetch_cover(u) for u in cover_urls) if c is not None][:4]
+    def fit(im, w, h):
+        r = max(w / im.width, h / im.height); im = im.resize((max(w, round(im.width * r)), max(h, round(im.height * r))))
+        x, y = (im.width - w) // 2, (im.height - h) // 3
+        return im.crop((x, max(0, y), x + w, max(0, y) + h))
+    if covers:
+        n = len(covers)
+        cells = {1: [(0, 0, W, H)], 2: [(0, 0, W // 2, H), (W // 2, 0, W // 2, H)],
+                 3: [(0, 0, W * 3 // 5, H), (W * 3 // 5, 0, W * 2 // 5, H // 2), (W * 3 // 5, H // 2, W * 2 // 5, H // 2)],
+                 4: [(0, 0, W // 2, H // 2), (W // 2, 0, W // 2, H // 2), (0, H // 2, W // 2, H // 2), (W // 2, H // 2, W // 2, H // 2)]}[n]
+        for im, (x, y, w, h) in zip(covers, cells):
+            img.paste(fit(im, w, h), (x, y))
+        d = ImageDraw.Draw(img)
+        for (x, y, w, h) in cells[1:]:      # thin gutters between pictures
+            d.rectangle((x - 2, y - 2, x + 1, y + h), fill=(17, 12, 74)); d.rectangle((x, y - 2, x + w, y + 1), fill=(17, 12, 74))
+    else:
+        d = ImageDraw.Draw(img)
+        for i in range(H):                   # soft brand gradient
+            t = i / H; d.line((0, i, W, i), fill=(int(17 + 60 * t), int(12 + 4 * t), int(74 - 10 * t)))
+    shade = Image.new("RGBA", (W, H), (0, 0, 0, 0)); sd = ImageDraw.Draw(shade)
+    for i in range(H // 3, H):               # dark fade at the bottom so the text always reads
+        sd.line((0, i, W, i), fill=(10, 7, 45, int(235 * ((i - H // 3) / (H - H // 3)) ** 1.4)))
+    img = Image.alpha_composite(img.convert("RGBA"), shade).convert("RGB"); d = ImageDraw.Draw(img)
+    d.rectangle((0, 0, 14, H), fill=(254, 44, 85))
+    x0 = 56
+    if title and _can_draw(title):
+        if kicker and _can_draw(kicker):
+            d.text((x0, H - 262), kicker.upper(), font=font(26), fill=(255, 120, 150))
+        f = font(64); lines, cur = [], ""
+        for wd in title.split():
+            if d.textlength((cur + " " + wd).strip(), font=f) <= W - 2 * x0: cur = (cur + " " + wd).strip()
+            else: lines.append(cur); cur = wd
+        lines.append(cur)
+        if len(lines) > 2:
+            lines = lines[:2]; lines[1] = lines[1].rstrip(" .,;:") + "…"
+        y = H - 222
+        for ln in lines:
+            d.text((x0, y), ln, font=f, fill=(255, 255, 255)); y += 76
+    d.text((x0, H - 62), brand, font=font(30), fill=(255, 255, 255))
+    if tagline and _can_draw(tagline):
+        d.text((x0 + d.textlength(brand, font=font(30)) + 22, H - 58), tagline, font=font(22), fill=(200, 196, 235))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img.save(dest, "JPEG", quality=84, optimize=True, progressive=True)
+    return True
+
+
+def build_previews(site, out):
+    """Fill site.previews = {page path: 'og/file.jpg'}."""
+    site.previews = {}
+    base = site.cfg["base_url"].rstrip("/")
+    if not base or site.embed or site.locked():
+        return
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        print("Share previews skipped (Pillow is not installed)")
+        return
+    from concurrent.futures import ThreadPoolExecutor
+    cfg = site.cfg; brand = re.sub(r"™", "", cfg["site_name"]) + "™"
+    arts = sorted([a for a in site.arts if not a.is_embed], key=lambda a: a.date, reverse=True)
+    def covers_of(items):
+        urls = []
+        for a in items:
+            u = site.img(a.image_raw, "")
+            if u and (u.startswith("http") or u.startswith("data:")) and u not in urls: urls.append(u)
+            if len(urls) == 4: break
+        return urls
+    jobs = [("index.html", "og/home.jpg", cfg["tagline"], "Latest stories", covers_of(arts))]
+    for sl, c in site.cats.items():
+        items = sorted([a for a in c["items"] if not a.is_embed], key=lambda a: a.date, reverse=True)
+        jobs.append((f"c/{sl}.html", f"og/c-{sl}.jpg", c["name"], "Latest stories", covers_of(items)))
+    wanted = {u for j in jobs for u in j[4]}
+    _COVER_DEADLINE[0] = time.monotonic() + 75
+    with ThreadPoolExecutor(8) as ex: list(ex.map(_fetch_cover, wanted))
+    for path, fn, title, kicker, urls in jobs:
+        if make_preview(out / fn, title, kicker, urls, brand, "" if path != "index.html" else ""):
+            site.previews[path] = fn
+    if make_preview(out / "og/site.jpg", cfg["tagline"], "", [], brand):
+        site.previews["*"] = "og/site.jpg"
+    n = 0
+    for a in arts:                           # a story with no picture of its own gets a card with its headline
+        if not site.img(a.image_raw, "") and n < 400:
+            if make_preview(out / f"og/a-{a.slug}.jpg", a.title, a.category, [], brand):
+                site.previews[f"a/{a.slug}.html"] = f"og/a-{a.slug}.jpg"; n += 1
+    print(f"Share previews: {len(site.previews)} pictures")
+
+
 class Site:
     def __init__(self, cfg, arts, now):
         self.cfg, self.arts, self.now = cfg, arts, now
+        self.previews = {}
         self.embed = cfg.get("_embed") or ""            # slug of the partner this copy of the site is made for
         cats = {}
         for a in arts:
@@ -826,8 +974,16 @@ class Site:
              f'<meta property="og:description" content="{esc(desc)}">' \
              f'<meta property="og:type" content="{kind}">' \
              f'<meta property="og:site_name" content="{esc(cfg["site_name"])}">'
+        pv = self.previews.get(path) if path else None
+        if pv and (path == "index.html" or path.startswith("c/") or not (image and image.startswith("http"))):
+            image = f"{base}/{pv}"              # a collage of the newest stories (home, sections) or a headline card (stories with no picture)
+        elif not (image and image.startswith("http")) and self.previews.get("*") and not str(seo.get("default_image", "")).startswith("https://"):
+            image = f"{base}/{self.previews['*']}"
         if image and image.startswith("http"):
-            og += f'<meta property="og:image" content="{esc(image)}"><meta name="twitter:card" content="summary_large_image">'
+            og += (f'<meta property="og:image" content="{esc(image)}"><meta property="og:image:alt" content="{esc((shown or home_t)[:120])}">'
+                   f'<meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="{esc(image)}">')
+            if image.endswith(".jpg") and "/og/" in image:
+                og += '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:type" content="image/jpeg">'
         if base and path:
             canon = base + "/" + ("" if path == "index.html" else path)
             og += f'<link rel="canonical" href="{esc(canon)}"><meta property="og:url" content="{esc(canon)}">'
@@ -836,7 +992,7 @@ class Site:
                 f'<link rel="apple-touch-icon" href="{root}assets/apple-touch-icon.png?v={asset_ver("apple-touch-icon.png")}">'
                 f'<meta name="theme-color" content="#110c4a">')
         dimg = seo.get("default_image") if str(seo.get("default_image", "")).startswith("https://") else (base + "/assets/og-default.png" if base else "")
-        if dimg and not (image and image.startswith("http")):
+        if dimg and not (image and image.startswith("http")):     # nothing better available: the default picture
             og += f'<meta property="og:image" content="{esc(dimg)}"><meta name="twitter:card" content="summary_large_image">'
         og += f'<meta name="twitter:title" content="{esc((shown or home_t)[:70])}"><meta name="twitter:description" content="{esc(desc[:200])}">' + meta
         og += f'<link rel="alternate" type="application/rss+xml" title="{esc(cfg["site_name"])}" href="{root}feed.xml">'
@@ -1189,7 +1345,7 @@ class Site:
         if title == "" and not kw.get("ld"):
             base = self.cfg["base_url"].rstrip("/")
             kw["ld"] = {"@context": "https://schema.org", "@type": "NewsMediaOrganization", "@id": f"{base}/#org" if base else None,
-                        "name": self.cfg["site_name"], "alternateName": ["SparkNews", "Spark News"], "url": (base + "/") if base else None,
+                        "name": self.cfg["site_name"], "alternateName": name_variants(self.cfg["site_name"]), "url": (base + "/") if base else None,
                         "email": "press@sparknews.cc" if base else None,
                         "contactPoint": {"@type": "ContactPoint", "contactType": "press", "email": "press@sparknews.cc"} if base else None,
                         "logo": (self.cfg["seo"].get("logo") or f"{base}/assets/logo.png") if base else None, "description": self.cfg["seo"].get("about") or self.cfg["tagline"],
@@ -1469,6 +1625,8 @@ class Site:
         if self.locked():
             inner = re.sub(r'<iframe[^>]*?src="(https?://[^"]+)"[^>]*>\s*</iframe>', lambda m: f'<p><a href="{m.group(1)}" target="_blank" rel="noopener noreferrer">Open embedded content &rsaquo;</a></p>', inner)
         art = f'<article class="wrap narrow"{dattr}>{inner}</article>'
+        if not self.locked():
+            art += f'<script src="{root}assets/listen.js?v={asset_ver("listen.js")}" defer></script>'
         if related:
             art += (f'<section class="wrap rel"><h2 class="sec">More in {esc(a.category)}</h2>'
                     f'<div class="grid3">{"".join(self.card(x, root) for x in related)}</div></section>')
@@ -1715,6 +1873,8 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     img_dir = ARTICLES_DIR / "images"
     if img_dir.exists():
         shutil.copytree(img_dir, out / "images")
+
+    build_previews(site, out)
 
     def w(p, s):
         if not p.startswith("editor/") and p.endswith((".html", ".json", ".xml")):
