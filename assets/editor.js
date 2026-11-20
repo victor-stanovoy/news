@@ -7,6 +7,46 @@
   var app = document.getElementById('app');
   var LANGS = { ar: 'العربية', zh: '中文', fr: 'Français', ru: 'Русский', es: 'Español', de: 'Deutsch', it: 'Italiano',
     pt: 'Português', ja: '日本語', ko: '한국어', tr: 'Türkçe', pl: 'Polski', nl: 'Nederlands', uk: 'Українська', en: 'English' };
+  /* Free automatic translation (MyMemory, no account or key). Whole sentences go out in small batches; HTML tags stay untouched.
+     Limits: about 5,000 characters a day per internet connection, so very long articles may need a second day. Quality is "good enough to read": ask a person to check. */
+  var MM = { zh: 'zh-CN', pt: 'pt-PT' };
+  function mmCode(l) { return MM[l] || l; }
+  function mmOne(text, from, to) {
+    return fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=' + encodeURIComponent(mmCode(from) + '|' + mmCode(to))).then(function (r) {
+      if (!r.ok) throw new Error('The translation service is not answering (' + r.status + ').');
+      return r.json();
+    }).then(function (j) {
+      var st = Number(j.responseStatus);
+      if (st === 429 || /QUOTA|LIMIT/i.test(String(j.responseDetails || ''))) throw new Error('The free daily translation limit is used up. Try again tomorrow, or translate fewer languages at once.');
+      if (st !== 200) throw new Error(String(j.responseDetails || 'The translation failed.'));
+      var t = String((j.responseData && j.responseData.translatedText) || '');
+      var d = document.createElement('textarea'); d.innerHTML = t;     /* the service returns HTML entities */
+      return d.value || text;
+    });
+  }
+  function chunk(text) {         /* pieces of at most ~450 characters, cut at sentence ends */
+    var out = [], cur = '';
+    (text.match(/[^.!?\u3002]+[.!?\u3002]*\s*/g) || [text]).forEach(function (sn) {
+      if (sn.length > 450) { if (cur) { out.push(cur); cur = ''; } for (var i = 0; i < sn.length; i += 450) out.push(sn.slice(i, i + 450)); return; }
+      if ((cur + sn).length > 450) { out.push(cur); cur = sn; } else cur += sn;
+    });
+    if (cur) out.push(cur); return out;
+  }
+  function mmText(text, from, to) {
+    if (!text.trim()) return Promise.resolve(text);
+    var lead = (text.match(/^\s*/) || [''])[0], tail = (text.match(/\s*$/) || [''])[0], parts = chunk(text.trim()), res = [];
+    return parts.reduce(function (p, part, i) { return p.then(function () { return mmOne(part, from, to).then(function (t) { res[i] = t; }); }); }, Promise.resolve())
+      .then(function () { return lead + res.join(' ') + tail; });
+  }
+  function mmHtml(html, from, to, progress) {      /* translate the text inside the tags, keep the tags */
+    var plain = !/<[a-z][\s\S]*>/i.test(html);
+    var doc = new DOMParser().parseFromString('<body>' + (plain ? html.split(/\n\s*\n/).map(function (p) { return '<p>' + p.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>'; }).join('') : html) + '</body>', 'text/html');
+    var w = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null), nodes = [], n;
+    while ((n = w.nextNode())) { var par = n.parentNode && n.parentNode.nodeName; if (n.nodeValue.trim() && !/^(SCRIPT|STYLE|CODE|PRE)$/.test(par)) nodes.push(n); }
+    var done = 0;
+    return nodes.reduce(function (p, node) { return p.then(function () { return mmText(node.nodeValue, from, to).then(function (t) { node.nodeValue = t; done++; if (progress) progress(done, nodes.length); }); }); }, Promise.resolve())
+      .then(function () { return plain ? [].map.call(doc.body.children, function (e) { return e.textContent; }).join('\n\n') : doc.body.innerHTML; });
+  }
   var SPARK = 'M12 0C13 7 17 11 24 12C17 13 13 17 12 24C11 17 7 13 0 12C7 11 11 7 12 0Z';
 
   var sb = null, me = { id: '', email: '', role: '', name: '' };
@@ -1788,6 +1828,7 @@
     /* translations */
     var trBox = h('div'), trData = {};
     Object.keys(a.translations || {}).forEach(function (l) { if (a.translations[l]) addTr(l, a.translations[l]); });
+    f.srcLang = h('select', { 'aria-label': 'Language of this article' }); Object.keys(LANGS).forEach(function (l) { f.srcLang.appendChild(h('option', { value: l, text: LANGS[l] + ' (' + l + ')' })); }); f.srcLang.value = 'en';
     var trSel = h('select', {}, h('option', { value: '', text: '+ Add a translation…' }));
     Object.keys(LANGS).forEach(function (l) { trSel.appendChild(h('option', { value: l, text: LANGS[l] + ' (' + l + ')' })); });
     trSel.onchange = function () { if (trSel.value) { addTr(trSel.value, {}); mark(); } trSel.value = ''; };
@@ -1798,6 +1839,20 @@
       var c = h('textarea', { class: 'code', placeholder: 'Translated article (HTML, or plain text with blank lines between paragraphs)', oninput: mark }); c.value = v.content || '';
       var box = h('div', { class: 'tr' }, h('header', {}, h('strong', { text: (LANGS[l] || l) + ' (' + l + ')' }), h('button', { class: 'btn danger', type: 'button', text: 'Remove', onclick: function () { box.remove(); delete trData[l]; mark(); } })), t, s, c);
       trData[l] = { t: t, s: s, c: c }; trBox.appendChild(box);
+      var go = h('button', { class: 'btn', type: 'button', text: 'Translate for me' }), st = h('small', { class: 'hint', text: '' });
+      go.onclick = function () {
+        var src = { t: f.title.value.trim(), s: f.subtitle.value.trim(), c: (f.rawHtml ? f.rawHtml.value : (quill && quill.getLength() > 1 ? quill.root.innerHTML : '')).trim() };
+        if (!src.t && !src.c) return toast('Write the headline or the article first.', true);
+        if ((t.value || s.value || c.value) && !confirm('Replace the text in this ' + (LANGS[l] || l) + ' translation?')) return;
+        go.disabled = true; st.className = 'hint'; st.textContent = 'Translating\u2026';
+        var from = f.srcLang.value || 'en';
+        mmText(src.t, from, l).then(function (x) { t.value = x; return mmText(src.s, from, l); }).then(function (x) { s.value = x; return mmHtml(src.c, from, l, function (d, n) { st.textContent = 'Translating\u2026 ' + d + ' of ' + n + ' paragraphs'; }); })
+          .then(function (x) { c.value = x; aiT.input.checked = true; mark(); st.className = 'hint ok'; st.textContent = 'Done. This is an automatic translation: please read it through. "Translations were made automatically" has been ticked.'; })
+          .catch(function (e) { st.className = 'hint err'; st.textContent = e.message || String(e); })
+          .then(function () { go.disabled = false; });
+      };
+      box.querySelector('header').insertBefore(go, box.querySelector('header .btn.danger'));
+      box.appendChild(st);
     }
 
     /* buttons */
@@ -1823,7 +1878,7 @@
             field('Extra images layout', f.layout), field('Video', f.video), field('Sources & credits', f.citations),
             h('div', { class: 'row2' }, field('Series ID', f.seriesId), field('Series order', f.seriesOrder)), live.box, liveBox)),
           seoPanel,
-          h('div', { class: 'panel' }, h('h3', { text: 'Translations' }), aiT.box, trBox, trSel),
+          h('div', { class: 'panel' }, h('h3', { text: 'Translations' }), h('p', { class: 'hint', text: 'Add a language, then press "Translate for me": it translates the headline, the summary and the whole article with a free service (no account needed, about 5,000 characters a day). It is good enough to read but not perfect, so have someone check it before you publish.' }), field('This article is written in', f.srcLang), aiT.box, trBox, trSel),
           delBtn ? h('div', { class: 'panel' }, delBtn) : null)));
     /* the datalist must live in the document for the Section field */
     sync(); showCover(); buildBody();

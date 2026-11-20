@@ -369,3 +369,8 @@ Limits to know: the unlock is one shared password per school (not personal accou
 * **Personal logins (Google / Microsoft school accounts):** put the school's domain behind Cloudflare Access (Cloudflare Zero Trust, free for up to 50 users). Visitors sign in with their school email, and you choose who is allowed. This is the strongest option and needs no code here.
 * **Who can publish:** the editor already has admin, editor and writer roles with Supabase sign-in; give school staff the writer role.
 * **The school's own website:** if a school hosts its own copy, its own hosting's login or password options apply.
+
+
+## Automatic translation
+
+In the article editor, open **Translations**, tell it which language the article is written in, add a language and press **Translate for me**. It translates the headline, the summary and the whole article, keeping paragraphs, links and pictures as they are, and ticks "Translations were made automatically". It uses the free MyMemory service: no account or key, but about 5,000 characters a day per internet connection (a long article in several languages may need a second day). The result is good enough to read but not perfect, so have someone check it before you publish.
