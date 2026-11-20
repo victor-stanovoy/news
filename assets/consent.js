@@ -37,7 +37,6 @@
 
   /* ---------- banner ---------- */
   var box = null;
-  var COOKIE = '<svg viewBox="0 0 64 64" aria-hidden="true"><path class="ck" d="M32 4a28 28 0 1 0 28 28 12 12 0 0 1-13-11 12 12 0 0 1-11-13 4 4 0 0 0-4-4z" fill="#d9954b"/><circle cx="22" cy="24" r="3.6" fill="#5b3418"/><circle cx="38" cy="40" r="3.6" fill="#5b3418"/><circle cx="20" cy="42" r="2.8" fill="#5b3418"/><circle cx="33" cy="25" r="2.4" fill="#5b3418"/><circle cx="45" cy="50" r="2.4" fill="#5b3418"/></svg>';
 
   function toggleRow(id, title, text, on, locked) {
     var inp = h('input', { type: 'checkbox', id: 'cc-' + id });
@@ -56,25 +55,25 @@
 
   function open(openPanel) {
     if (box) { box.querySelector('.cc-card').focus(); return; }
-    var prefs = toggleRow('prefs', 'Preferences', 'Remember dark mode, ticker settings, volume and closed announcements on this device.', allowed('prefs'));
-    var media = toggleRow('media', 'Videos', 'Play YouTube videos without asking each time. YouTube then sees your visit.', allowed('media'));
-    var nec = toggleRow('nec', 'Necessary', 'This choice, and keeping poll votes from counting twice. Always on.', true, true);
-    var panel = h('div', { 'class': 'cc-panel', id: 'cc-panel' }, [nec.el, prefs.el, media.el,
+    var prefs = toggleRow('prefs', 'Preferences', 'Remember display settings such as dark mode, ticker options, volume and dismissed notices on this device.', allowed('prefs'));
+    var media = toggleRow('media', 'Embedded videos', 'Play YouTube videos without asking each time. YouTube then receives your visit data.', allowed('media'));
+    var nec = toggleRow('nec', 'Strictly necessary', 'Stores this choice and prevents duplicate poll votes. Always on.', true, true);
+    var panel = h('div', { 'class': 'cc-panel', id: 'cc-panel' }, [h('div', { 'class': 'cc-pin' }, [nec.el, prefs.el, media.el,
       h('div', { 'class': 'cc-actions' }, [
-        h('button', { type: 'button', 'class': 'cc-btn cc-main', 'data-a': 'save', text: 'Save my choices' })])]);
-    var card = h('div', { 'class': 'cc-card', role: 'dialog', 'aria-labelledby': 'cc-t', 'aria-describedby': 'cc-d', tabindex: '-1' }, [
-      h('div', { 'class': 'cc-head' }, [h('div', { 'class': 'cc-ico', html: COOKIE }),
-        h('div', {}, [h('h2', { id: 'cc-t', text: 'Your choice, your crumbs' }),
-          h('p', { id: 'cc-d', html: 'We do not track you and we show no ads. We would just like to remember things like dark mode, and to load YouTube videos only when you allow it. <a href="' + ROOT + 'privacy/index.html">Read how we handle data</a>.' })])]),
+        h('button', { type: 'button', 'class': 'cc-btn cc-main', 'data-a': 'save', text: 'Save choices' })])])]);
+    var card = h('div', { 'class': 'cc-card', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'cc-t', 'aria-describedby': 'cc-d', tabindex: '-1' }, [
+      h('p', { 'class': 'cc-eyebrow', text: 'Privacy' }),
+      h('h2', { id: 'cc-t', text: 'Your privacy choices' }),
+      h('p', { id: 'cc-d', html: 'We use no analytics and show no ads. With your permission, we store display preferences on this device and load embedded YouTube videos. <a href="' + ROOT + 'privacy/index.html">Privacy policy</a>' }),
       h('div', { 'class': 'cc-actions' }, [
-        h('button', { type: 'button', 'class': 'cc-btn cc-main', 'data-a': 'all', text: 'Accept all' }),
         h('button', { type: 'button', 'class': 'cc-btn', 'data-a': 'none', text: 'Only necessary' }),
+        h('button', { type: 'button', 'class': 'cc-btn cc-main', 'data-a': 'all', text: 'Accept all' }),
         h('button', { type: 'button', 'class': 'cc-link', 'data-a': 'custom', 'aria-expanded': 'false', 'aria-controls': 'cc-panel', text: 'Customise' })]),
       panel]);
     box = h('div', { 'class': 'cc' }, [card]);
     document.body.appendChild(box);
     requestAnimationFrame(function () { requestAnimationFrame(function () { box && box.classList.add('in'); }); });
-    function setPanel(on) { card.classList.toggle('open', on); var c = card.querySelector('[data-a=custom]'); c.setAttribute('aria-expanded', on ? 'true' : 'false'); c.textContent = on ? 'Hide choices' : 'Customise'; }
+    function setPanel(on) { card.classList.toggle('open', on); var c = card.querySelector('[data-a=custom]'); c.setAttribute('aria-expanded', on ? 'true' : 'false'); c.textContent = on ? 'Hide options' : 'Customise'; }
     card.addEventListener('click', function (e) {
       var a = e.target.closest && e.target.closest('[data-a]'); if (!a) return;
       var k = a.getAttribute('data-a');
