@@ -293,3 +293,4 @@ body.focusing{overflow:hidden}
 /* ---- word count, announcements ---- */
 .wcbar{margin:8px 0 0;padding:6px 10px;font-size:13px;background:#eef0f7;color:#444}.wcbar.short{background:#fff1d6;color:#7a4b00}.wcbar.ok{background:#e0f5e9;color:#0c5a31}
 .annitem{border:1px solid #d5d8e2;padding:12px;margin:0 0 12px;background:#fff}
+.ytprev{margin-top:10px}.ytprev:empty{display:none}.ytprev iframe{width:100%;aspect-ratio:16/9;border:0;background:#000;display:block}

@@ -1039,6 +1039,44 @@
     return h('div', {}, h('div', { class: 'uprow' }, up, loopBox.box), msg, listEl);
   }
 
+  /* a YouTube video on air: visitors get YouTube's official player (with sound) over the picture; your microphone keeps playing */
+  function ytPanel(kind, stops) {
+    var url = h('input', { type: 'url', placeholder: 'Paste a YouTube link', 'aria-label': 'YouTube link' });
+    var msg = h('p', { class: 'hint' }), box = h('div', { class: 'ytprev' }), playing = '';
+    function idOf(u) {
+      u = String(u || '').trim();
+      var m = u.match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/|v\/))([A-Za-z0-9_-]{11})/) || u.match(/^([A-Za-z0-9_-]{11})$/);
+      return m ? m[1] : '';
+    }
+    function say(t, cls) { msg.className = 'hint' + (cls ? ' ' + cls : ''); msg.textContent = t; }
+    function missing(e) { return /live_youtube|function|schema cache/i.test(errText(e)) && !/not on air|not a YouTube/i.test(errText(e)) ? 'Run supabase/live-youtube.sql in Supabase first (see the README).' : errText(e); }
+    function preview(id) {
+      box.replaceChildren();
+      if (!id) return;
+      box.appendChild(h('iframe', { src: 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1&rel=0&playsinline=1', title: 'YouTube video playing on air', allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen', allowfullscreen: 'true' }));
+    }
+    function start() {
+      var id = idOf(url.value);
+      if (!onAir[kind]) { say('Go on air first (press Start in the Broadcast panel), then play the video.', 'err'); return; }
+      if (!id) { say('That does not look like a YouTube link.', 'err'); return; }
+      sb.rpc('live_youtube', { p_kind: kind, p_id: id }).then(function (r) {
+        if (r.error) throw r.error;
+        playing = id; preview(id); say('Playing for your viewers now. They hear it together with your microphone. Use headphones so it does not echo.', 'ok');
+      }).catch(function (e) { say(missing(e), 'err'); });
+    }
+    function stop() {
+      sb.rpc('live_youtube', { p_kind: kind, p_id: '' }).then(function (r) {
+        if (r.error) throw r.error;
+        playing = ''; preview(''); say('Video stopped. Viewers see the broadcast again.', 'ok');
+      }).catch(function (e) { say(missing(e), 'err'); });
+    }
+    stops.push(function () { box.replaceChildren(); });
+    return h('section', { class: 'panel' }, h('h3', { text: 'YouTube on air' }),
+      h('p', { class: 'hint', text: 'Viewers see the video with sound, shown with YouTube\u2019s official player. Start the broadcast first.' }),
+      h('div', { class: 'uprow' }, url, h('button', { class: 'btn primary', type: 'button', text: 'Play for viewers', onclick: start }), h('button', { class: 'btn', type: 'button', text: 'Stop video', onclick: stop })),
+      msg, box);
+  }
+
   /* one studio window per channel: radio and TV have their own settings (saved in this browser) */
   function showDash(type, kind) {
     var isTv = typeOf(kind) === 'tv', S = loadSet(kind), stops = [];
@@ -1201,7 +1239,7 @@
           field('Microphone', mic), camField, res ? field('Video quality', res) : null,
           opt('echo', 'Echo cancellation'), opt('noise', 'Noise suppression'), opt('agc', 'Automatic volume levelling'),
           h('p', { class: 'hint', text: 'Use headphones when you test so the radio does not echo into your microphone.' })),
-        studio, musicPanel(kind, S, save, stops), padsPanel(kind, S, save, stops)));
+        studio, isTv ? ytPanel(kind, stops) : null, musicPanel(kind, S, save, stops), padsPanel(kind, S, save, stops)));
   }
 
   /* ---------------------------------------------------------------- newsletter window */
@@ -1472,6 +1510,7 @@
             h('div', { class: 'row2' }, field('Tab ticker style', mode), field('Symbol before headlines', bind(V.ticker.tab, 'prefix', 'text', { maxlength: 10 })))),
           h('section', { class: 'panel' }, h('h3', { text: 'Live radio and TV' }),
             tick(V.live, 'enabled', 'Show the Live page and menu link'),
+            tick(V.live, 'banner', 'Show a red "We are live" banner at the top of every page while radio or TV is on air'),
             h('p', { class: 'hint', text: 'Connection to LiveKit (the service that carries the broadcast).' }),
             lk.map(function (k) { return k.field; }), lkMsg,
             h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save LiveKit details', onclick: function () { saveKeys(lk, lkMsg, 'LiveKit details'); } }), testBtn)),

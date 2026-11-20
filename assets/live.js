@@ -76,7 +76,30 @@
     });
   }
 
+  /* a YouTube video the presenter plays on air: shown with YouTube's official player over the picture, started at the right second */
+  function clearYT(kind) {
+    var c = card(kind); if (!c) return;
+    c.querySelectorAll('.lyt-live,.lcredit-live').forEach(function (n) { n.remove(); });
+  }
+  function syncYT(kind) {
+    var c = card(kind), row = rows[kind]; if (!c) return;
+    var want = rooms[kind] && row && row.yt_id && row.yt_started_at ? row.yt_id + '@' + row.yt_started_at : '';
+    var cur = c.querySelector('.lyt-live');
+    if (!want) { if (cur) clearYT(kind); return; }
+    if (cur && cur.getAttribute('data-k') === want) return;
+    clearYT(kind);
+    var t0 = Date.parse(row.yt_started_at), now = row.server_now ? Date.parse(row.server_now) : Date.now();
+    var off = isFinite(t0) && isFinite(now) ? Math.max(0, Math.floor((now - t0) / 1000)) : 0;
+    var f = document.createElement('iframe'); f.className = 'lyt lyt-live'; f.setAttribute('data-k', want); f.title = 'Video shown on air'; f.setAttribute('allowfullscreen', '');
+    f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
+    f.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(row.yt_id) + '?autoplay=1&start=' + off + '&rel=0&playsinline=1&modestbranding=1';
+    var st = c.querySelector('.stage'); if (st) st.appendChild(f); else c.insertBefore(f, c.querySelector('.ctl'));
+    var cr = document.createElement('p'); cr.className = 'vnote lcredit-live'; cr.textContent = 'Video from YouTube. We do not own it: it belongs to its creator and is shown with YouTube\u2019s official embed player, as its terms allow.';
+    (st || f).insertAdjacentElement('afterend', cr);
+  }
+
   function stop(kind, keepMsg) {
+    clearYT(kind);
     stopSched(kind, true);
     var r = rooms[kind]; delete rooms[kind]; clearTimeout(timers[kind]);
     if (r) { try { r.disconnect(); } catch (e) {} }
@@ -85,11 +108,12 @@
     ui(kind);
   }
 
-  function play(kind) {
+  function play(kind, again) {
     var btn = q(kind, '.lbtn'), media = q(kind, '.lmedia');
     stopSched(kind, true);
     if (rooms[kind]) { retry[kind] = 99; stop(kind); return; }
-    retry[kind] = 0; btn.disabled = true; setMsg(kind, 'Connecting…');
+    if (!again) retry[kind] = 0;
+    btn.disabled = true; setMsg(kind, 'Connecting…');
     loadLiveKit().then(function () {
       return fetch(base + '/functions/v1/livekit-token', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: conf.anon_key }, body: JSON.stringify({ kind: kind, mode: 'watch' }) });
     }).then(function (r) {
@@ -97,17 +121,17 @@
     }).then(function (t) {
       var LK = window.LivekitClient, room = new LK.Room();
       rooms[kind] = room;
-      room.on(LK.RoomEvent.TrackSubscribed, function (track) { track.attach(media); media.classList.add('on'); applyAudio(kind); setMsg(kind, ''); });
+      room.on(LK.RoomEvent.TrackSubscribed, function (track) { track.attach(media); media.classList.add('on'); applyAudio(kind); setMsg(kind, ''); retry[kind] = 0; });
       room.on(LK.RoomEvent.Reconnecting, function () { setMsg(kind, 'Connection is weak. Reconnecting…'); });
       room.on(LK.RoomEvent.Reconnected, function () { setMsg(kind, ''); });
       room.on(LK.RoomEvent.Disconnected, function () {
         if (rooms[kind] !== room) return;
         stop(kind, true);
-        if (rows[kind] && (retry[kind] || 0) < 3) { retry[kind]++; setMsg(kind, 'Connection lost. Reconnecting…'); timers[kind] = setTimeout(function () { play(kind); }, 2500 * retry[kind]); }
+        if (rows[kind] && (retry[kind] || 0) < 6) { retry[kind] = (retry[kind] || 0) + 1; setMsg(kind, 'Connection lost. Reconnecting…'); timers[kind] = setTimeout(function () { play(kind, true); }, Math.min(2000 * retry[kind], 10000)); }
         else setMsg(kind, rows[kind] ? 'The connection was lost. Press play to try again.' : 'The broadcast has ended. Thanks for listening.');
       });
       return room.connect(t.url, t.token).then(function () {
-        btn.disabled = false; ui(kind); applyAudio(kind);
+        btn.disabled = false; ui(kind); applyAudio(kind); syncYT(kind);
         setMsg(kind, 'Connected. Waiting for sound…');
         return media.play().catch(function () { setMsg(kind, 'Press play on the player if you hear nothing.'); });
       });
@@ -123,9 +147,11 @@
       rows[r.kind] = r;
     });
     KINDS.forEach(function (k) {
-      if (prev[k] && !rows[k] && rooms[k]) { stop(k, true); setMsg(k, 'The broadcast has ended. Thanks for listening.'); }
+      if (rows[k]) misses[k] = 0;
+      else if (prev[k] && rooms[k] && (misses[k] = (misses[k] || 0) + 1) < 2) { rows[k] = prev[k]; }     /* one empty answer: wait for the next check */
+      else if (prev[k] && rooms[k]) { misses[k] = 0; stop(k, true); setMsg(k, 'The broadcast has ended. Thanks for listening.'); }
       if (rows[k] && spl[k]) { stopSched(k, true); play(k); }       /* a live broadcast starts: join it */
-      ui(k);
+      ui(k); syncYT(k);
       if (away[k]) {
         var m = q(k, '.lmsg'); m.textContent = 'Live now on ' + away[k].name + '. ';
         var a = document.createElement('a'); a.href = away[k].url.replace('{slug}', '').replace('{id}', ''); a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Watch or listen there';
@@ -134,9 +160,14 @@
     });
   }
 
+  /* A failed or slow status check (network blip, rate limit) must never stop a stream that is playing:
+     on error we keep the last known state, and a stream is only ended after two clean checks in a row say it is over. */
+  var misses = {};
   function refresh() {
     fetch(base + '/rest/v1/live_now?select=*', { headers: { apikey: conf.anon_key } })
-      .then(function (r) { return r.ok ? r.json() : []; }).then(paint).catch(function () { paint([]); });
+      .then(function (r) { if (!r.ok) throw new Error('status ' + r.status); return r.json(); })
+      .then(function (list) { if (Array.isArray(list)) paint(list); })
+      .catch(function () { /* keep playing */ });
   }
 
   function toggle(k) { if (rooms[k] || spl[k]) { retry[k] = 99; stop(k); } else if (rows[k]) play(k); else startSched(k); }
