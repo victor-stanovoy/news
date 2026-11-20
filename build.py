@@ -574,6 +574,7 @@ def clean_settings(d):
             acc = str(x.get("accent", "")).strip()
             ps.append({"slug": slug, "name": _str(x.get("name") or slug, 80), "url": url,
                        "main": "hide" if x.get("main") == "hide" else "redirect",
+                       "protect": "password" if x.get("protect") == "password" else "",
                        "accent": acc if re.match(r"^#[0-9a-fA-F]{6}$", acc) else "",
                        "logo": str(x.get("logo", "")).strip()[:400] if re.match(r"^https://[^\s\"'<>]+$", str(x.get("logo", "")).strip()) else ""})
         out["partners"] = ps
@@ -898,7 +899,11 @@ class Site:
 
     def seo_tags(self, ld=None):
         cfg = self.cfg; seo = cfg["seo"]; o = ""
-        o += '<meta name="robots" content="%s">' % ("index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" if seo.get("indexing") else "noindex,nofollow")
+        if seo.get("indexing"):
+            o += '<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">'
+        else:       # hidden copies (schools, partners): no listing, no cached copy, no snippet, no image search, no following links
+            o += '<meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex"><meta name="googlebot" content="noindex,nofollow,noarchive,nosnippet,noimageindex">'
+            o += '<meta name="referrer" content="no-referrer">' if self.embed else ""
         if seo.get("twitter_site"):
             o += f'<meta name="twitter:site" content="{esc(seo["twitter_site"])}">'
         if seo.get("google_verification"):
@@ -942,6 +947,43 @@ class Site:
         ld = {"@context": "https://schema.org", "@type": "AboutPage", "name": f"About {cfg['site_name']}", "url": f"{base}/about/" if base else None,
               "mainEntity": {"@id": f"{base}/#org"} if base else None}
         return self.page("About", body, "../", desc=(seo.get("about") or cfg["tagline"])[:200], path="about/index.html", ld={k: v for k, v in ld.items() if v})
+
+    def archive_page(self, skip=()):
+        """Every article on one plain page, newest first, grouped by month: the easiest thing for crawlers (and people) to follow."""
+        cfg = self.cfg; base = cfg["base_url"].rstrip("/")
+        months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+        groups = {}
+        for a in self.arts:
+            if a.slug not in skip and not a.is_embed:
+                groups.setdefault((a.date.year, a.date.month), []).append(a)
+        keys = sorted(groups, reverse=True)
+        jump = "".join(f'<a href="#m{y}-{m}">{months[m-1][:3]} {y}</a>' for y, m in keys[:36])
+        body = "".join(
+            f'<h2 id="m{y}-{m}">{months[m-1]} {y}</h2><ul>' + "".join(
+                f'<li><time datetime="{a.date.isoformat()}">{esc(fmt_date(a.date))} &middot; {esc(a.category)}</time><a href="../a/{a.slug}.html">{esc(a.title)}</a></li>'
+                for a in groups[(y, m)]) + "</ul>" for y, m in keys)
+        n = sum(len(v) for v in groups.values())
+        html_ = (f'<div class="wrap narrow archive"><h1>All articles</h1><p class="lead">Every story published on {esc(cfg["site_name"])}: {n} articles, newest first.</p>'
+                 f'<nav class="ajump" aria-label="Jump to a month">{jump}</nav>{body}</div>')
+        ld = {"@context": "https://schema.org", "@type": "CollectionPage", "name": f"All articles | {cfg['site_name']}",
+              "url": f"{base}/archive/index.html" if base else None, "isPartOf": {"@id": f"{base}/#org"} if base else None}
+        return self.page("All articles", html_, "../", desc=f"Every article published on {cfg['site_name']}, newest first: {n} stories on science, technology, society and culture.",
+                         path="archive/index.html", ld={k: v for k, v in ld.items() if v})
+
+    def llms_txt(self, skip=()):
+        """llms.txt: a short plain-text guide for AI assistants (what this site is, where the articles are)."""
+        cfg = self.cfg; seo = cfg["seo"]; base = cfg["base_url"].rstrip("/")
+        if not base:
+            return None
+        o = [f"# {cfg['site_name']}", "", f"> {seo.get('about') or cfg['tagline']}", "",
+             "Articles may be quoted with a link back to the original page.", "", "## Start here", "",
+             f"- [Home]({base}/): latest stories", f"- [About]({base}/about/index.html): who we are and our mission",
+             f"- [All articles]({base}/archive/index.html): every article, newest first",
+             f"- [Sitemap]({base}/sitemap.xml)", f"- [RSS feed]({base}/feed.xml)", "", "## Sections", ""]
+        o += [f"- [{c['name']}]({base}/c/{sl}.html)" for sl, c in self.cats.items()]
+        o += ["", "## Latest articles", ""]
+        o += [f"- [{a.title}]({base}/a/{a.slug}.html): {a.excerpt}" for a in [x for x in self.arts if x.slug not in skip and not x.is_embed][:40]]
+        return "\n".join(o) + "\n"
 
     def privacy_page(self):
         cfg = self.cfg; locked = self.locked(); li = []
@@ -1044,7 +1086,7 @@ class Site:
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
         return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
-                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}about/index.html">About</a> &middot; <a href="{root}privacy/index.html">Privacy</a></p>'
+                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}about/index.html">About</a>{"" if self.embed else f' &middot; <a href="{root}archive/index.html">All articles</a>'} &middot; <a href="{root}privacy/index.html">Privacy</a>{"" if self.locked() else ' &middot; <a href="#" data-cookie-settings>Cookie settings</a>'}</p>'
                 f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
 
     def ticker_entries(self, root):
@@ -1091,8 +1133,10 @@ class Site:
             data["polls"] = {"url": u, "key": k}
             polls_tag = f'<script src="{root}assets/polls.js?v={asset_ver("polls.js")}" defer></script>'
         blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+        cons = "" if self.locked() else f'<script src="{root}assets/consent.js?v={asset_ver("consent.js")}" defer></script>'
         return (f'<script id="spark-ticker-data" type="application/json">{blob}</script>'
-                f'<script src="{root}assets/site.js?v={asset_ver("site.js")}" defer></script>' + nl_tag + polls_tag)
+                f'<script src="{root}assets/site.js?v={asset_ver("site.js")}" defer></script>' + nl_tag + polls_tag + cons
+                + f'<script src="{root}assets/fx.js?v={asset_ver("fx.js")}" defer></script>')
 
     def page(self, title, body, root, active="", **kw):
         if title == "" and not kw.get("ld"):
@@ -1361,6 +1405,8 @@ class Site:
 
         dattr = f' lang="{lang}" dir="{"rtl" if lang in RTL_LANGS else "ltr"}"' if lang else ""
         inner = "".join(parts)
+        if not self.locked():
+            inner = _VIDEO_IFRAME.sub(lambda m: video_gate(m.group(1)), inner)
         if self.locked():
             inner = re.sub(r'<iframe[^>]*?src="(https?://[^"]+)"[^>]*>\s*</iframe>', lambda m: f'<p><a href="{m.group(1)}" target="_blank" rel="noopener noreferrer">Open embedded content &rsaquo;</a></p>', inner)
         art = f'<article class="wrap narrow"{dattr}>{inner}</article>'
@@ -1445,7 +1491,7 @@ class Site:
             if mod: x += f"<lastmod>{mod.strftime('%Y-%m-%d')}</lastmod>"
             if img and str(img).startswith("http"): x += f"<image:image><image:loc>{esc(img)}</image:loc></image:image>"
             return x + "</url>"
-        rows = [u(f"{base}/index.html"), u(f"{base}/about/index.html")] + [u(f"{base}/c/{s}.html") for s in self.cats]
+        rows = [u(f"{base}/index.html"), u(f"{base}/about/index.html"), u(f"{base}/archive/index.html")] + [u(f"{base}/c/{s}.html") for s in self.cats]
         for a in self.arts:
             if a.is_embed or a.slug in skip: continue
             mod = a.updated or a.date
@@ -1482,6 +1528,89 @@ class Site:
 
 
 # --------------------------------------------------------------------------- main
+_VIDEO_IFRAME = re.compile(r'(?:<div class="video">\s*)?<iframe[^>]*?src="(https://(?:www\.youtube(?:-nocookie)?\.com|player\.vimeo\.com)/[^"]+)"[^>]*>\s*</iframe>(?:\s*</div>)?')
+
+
+def video_gate(src, title="Video"):
+    """A click-to-play box instead of the video itself: nothing is loaded from YouTube/Vimeo until the visitor chooses to,
+    and the credit line below it says whose video it is."""
+    name = "Vimeo" if "vimeo" in src else "YouTube"
+    return (f'<figure class="vwrap"><div class="vgate" data-src="{esc(src)}" data-title="{esc(title)}"><div>'
+            f'<button type="button" class="vplay"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>Play video</button>'
+            f'<small>This video is hosted by {name}. Playing it connects your browser to {name}.</small>'
+            f'<a href="#" class="valways">Always play videos without asking</a></div></div>'
+            f'<noscript><p><a href="{esc(src)}" target="_blank" rel="noopener noreferrer">Watch on {name} &rsaquo;</a></p></noscript>'
+            f'<figcaption class="vnote"><span>Video from {name}. We do not own this video: it belongs to its creator and is shown here with '
+            f'{name}&rsquo;s official embed player, as its terms allow. All rights stay with the owner.</span></figcaption></figure>')
+
+
+# ---- password-protected school copies -------------------------------------------------------------------------
+# A protected copy is encrypted when the site is built (AES-256-GCM, key from the password with PBKDF2-SHA256, 200,000 rounds).
+# What goes online is only the encrypted pages and a small unlock screen: without the password the stories cannot be read, by Google or anyone.
+GATE_ROUNDS = 200000
+_GATE_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex"><meta name="googlebot" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
+<title>Private | %(name)s</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;font:16px/1.5 Inter,"Helvetica Neue",Arial,system-ui,sans-serif;background:#110c4a;color:#14112e;padding:16px}
+.g{width:min(420px,100%%);background:#fff;padding:30px;box-shadow:0 30px 80px -20px rgba(0,0,0,.6);border-top:5px solid #fe2c55;animation:u .6s cubic-bezier(.2,1,.3,1) both}
+@keyframes u{from{opacity:0;transform:translateY(24px)}}h1{font-size:22px;margin:0 0 6px;letter-spacing:-.3px}p{margin:0 0 18px;color:#5e5c7a;font-size:14.5px}
+.ico{width:44px;height:44px;background:#110c4a;color:#fff;display:grid;place-items:center;margin-bottom:16px}
+input{width:100%%;font:inherit;padding:13px;border:2px solid #cfcdea;border-radius:0;margin-bottom:12px}input:focus{outline:0;border-color:#fe2c55}
+button{width:100%%;font:inherit;font-weight:700;padding:13px;border:0;background:#fe2c55;color:#fff;cursor:pointer;border-radius:0;transition:transform .15s}button:active{transform:scale(.97)}button:disabled{opacity:.6}
+.e{color:#d4163f;font-size:14px;min-height:20px;margin:0 0 8px}.s{animation:s .4s}@keyframes s{25%%{transform:translateX(-8px)}75%%{transform:translateX(8px)}}
+</style></head><body><main class="g" id="g" hidden><div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="11" width="14" height="9"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+<h1>%(name)s</h1><p>This is a private page. Enter the password you were given to read it.</p>
+<form id="f"><input id="p" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" required><div class="e" id="e" role="alert"></div><button id="b">Unlock</button></form></main>
+<noscript><main class="g"><h1>%(name)s</h1><p>This private page needs JavaScript to unlock.</p></main></noscript>
+<script id="lk" type="application/json">%(blob)s</script>
+<script>(function(){var d=JSON.parse(document.getElementById('lk').textContent),S='spark-gate-'+d.s;
+function b(x){return Uint8Array.from(atob(x),function(c){return c.charCodeAt(0)})}
+async function dec(pw){var k=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
+var key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:b(d.salt),iterations:d.n,hash:'SHA-256'},k,{name:'AES-GCM',length:256},false,['decrypt']);
+return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:b(d.iv)},key,b(d.ct)))}
+function show(html,pw){try{sessionStorage.setItem(S,pw)}catch(x){}document.open();document.write(html);document.close()}
+var g=document.getElementById('g');
+if(!window.crypto||!crypto.subtle){g.hidden=false;document.getElementById('e').textContent='This browser cannot unlock the page. Use a current browser over https.';return}
+var saved=null;try{saved=sessionStorage.getItem(S)}catch(x){}
+function ask(){g.hidden=false;document.getElementById('p').focus()}
+if(saved){dec(saved).then(function(h){show(h,saved)},function(){try{sessionStorage.removeItem(S)}catch(x){}ask()})}else ask();
+document.getElementById('f').addEventListener('submit',function(ev){ev.preventDefault();var pw=document.getElementById('p').value,bt=document.getElementById('b'),er=document.getElementById('e');bt.disabled=true;er.textContent='';
+dec(pw).then(function(h){show(h,pw)},function(){bt.disabled=false;er.textContent='That password is not right.';g.classList.remove('s');void g.offsetWidth;g.classList.add('s');document.getElementById('p').select()})});
+})();</script></body></html>"""
+
+
+def partner_passwords():
+    """Passwords for protected schools. They come from the build's environment (a GitHub secret), never from the public settings."""
+    try:
+        d = json.loads(os.environ.get("SPARK_PARTNER_PASSWORDS", "") or "{}")
+    except ValueError:
+        return {}
+    return {str(k): v for k, v in d.items() if isinstance(v, str)} if isinstance(d, dict) else {}
+
+
+def lock_folder(folder, password, name, slug):
+    """Replace every page in a partner copy with an encrypted version, and remove the files that would list its stories in plain text."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    import base64
+    n = 0
+    for f in list(folder.rglob("*")):
+        if f.is_file() and f.name in ("search.json", "feed.xml", "sitemap.xml", "news-sitemap.xml", "robots.txt"):
+            f.unlink()
+    for f in folder.rglob("*.html"):
+        if "assets" in f.relative_to(folder).parts:
+            continue
+        salt, iv = os.urandom(16), os.urandom(12)
+        key = PBKDF2HMAC(hashes.SHA256(), 32, salt, GATE_ROUNDS).derive(password.encode("utf-8"))
+        ct = AESGCM(key).encrypt(iv, f.read_text(encoding="utf-8").encode("utf-8"), None)
+        blob = json.dumps({"s": slug, "n": GATE_ROUNDS, "salt": base64.b64encode(salt).decode(), "iv": base64.b64encode(iv).decode(),
+                           "ct": base64.b64encode(ct).decode()}).replace("</", "<\\/")
+        f.write_text(_GATE_PAGE % {"name": esc(name), "blob": blob}, encoding="utf-8")
+        n += 1
+    return n
+
+
 def partner_target(p, a, base, viewer):
     """Where a redirected story goes: the partner's own website if they have one, otherwise their copy hosted on this site."""
     if p.get("url"):
@@ -1539,6 +1668,12 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     w("privacy/index.html", site.privacy_page())
     (out / "about").mkdir()
     w("about/index.html", site.about_page())
+    if not site.embed:
+        (out / "archive").mkdir()
+        w("archive/index.html", site.archive_page(redirects))
+        if not site.locked() and cfg["seo"].get("indexing") and not cfg["seo"].get("block_ai_crawlers"):
+            lt = site.llms_txt(redirects)
+            if lt: (out / "llms.txt").write_text(lt, encoding="utf-8")
     w("robots.txt", site.robots())
     (out / "settings").mkdir()
     w("settings/index.html", site.settings_page())
@@ -1587,19 +1722,34 @@ def main():
     apply_db_settings(cfg)
     arts, skipped = load_articles(cfg, now)
     partners = cfg.get("partners", [])
+    for p in partners:
+        if p.get("protect") == "password":
+            p["main"] = "hide"              # a protected school's stories must not show up (or be linked) on the public site
     if OUT.exists():
         shutil.rmtree(OUT)
     base = cfg["base_url"].rstrip("/")
     keep, red = view_for(arts, partners, None, base)
     site = Site(cfg, keep, now)
     write_site(site, keep, red, OUT, True, cfg)
+    pws = partner_passwords()
     for p in partners:                      # one full copy of the site per partner, under /p/<label>/
+        locked_pw = ""
+        if p.get("protect") == "password":
+            locked_pw = pws.get(p["slug"], "")
+            if len(locked_pw) < 10:         # never publish a copy that is meant to be private without its lock
+                print(f"WARNING: '{p['slug']}' is set to password protected but has no password of 10+ characters in the "
+                      f"SPARK_PARTNER_PASSWORDS secret. Its copy was NOT published.")
+                continue
         c2 = copy.deepcopy(cfg)
         c2.update(site_name=p["name"], logo_left=p["name"], logo_right="", _embed=p["slug"], _main_base=base, base_url=f"{base}/p/{p['slug']}" if base else "")
         c2["seo"].update(indexing=False, news_sitemap=False)
         keep2, red2 = view_for(arts, partners, p["slug"], base)
         write_site(Site(c2, keep2, now), keep2, red2, OUT / "p" / p["slug"], False, c2)
-        print(f"Partner embed '{p['slug']}': {len(keep2)} articles -> {OUT / 'p' / p['slug']}")
+        if locked_pw:
+            nl = lock_folder(OUT / "p" / p["slug"], locked_pw, p["name"], p["slug"])
+            print(f"Partner embed '{p['slug']}': {len(keep2)} articles, {nl} pages encrypted behind a password")
+        else:
+            print(f"Partner embed '{p['slug']}': {len(keep2)} articles -> {OUT / 'p' / p['slug']}")
     print(f"Built {len(keep)} articles in {len(site.cats)} sections -> {OUT}")
     sk = ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in skipped.items() if v)
     if sk:

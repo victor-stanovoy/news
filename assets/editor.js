@@ -1270,12 +1270,16 @@
           upload(f).then(function (u) { p.logo = u; lg.value = u; preview(); toast('Logo uploaded. Save settings to keep it.'); }, function (e) { toast(errText(e), true); });
         } });
         preview();
+        var pr = h('select', { 'aria-label': 'Who can open this copy' }, h('option', { value: '', text: 'Anyone with the link (hidden from Google)' }), h('option', { value: 'password', text: 'Password protected (encrypted)' }));
+        pr.value = p.protect === 'password' ? 'password' : ''; pr.addEventListener('change', function () { p.protect = pr.value; draw(); });
+        var prHint = p.protect === 'password' ? h('p', { class: 'hint', html: 'The password is <b>not</b> saved here, because anyone could read it. Add it once in GitHub: repository <b>Settings \u2192 Secrets and variables \u2192 Actions \u2192 New repository secret</b>, name <code>SPARK_PARTNER_PASSWORDS</code>, value <code>{"' + (p.slug || 'label') + '":"a long password"}</code> (10+ characters; several schools: <code>{"a":"...","b":"..."}</code>). Until it is there, this copy is not published at all. Stories labelled for this school are hidden from the public site.' }) : null;
         var ac = h('input', { type: 'text', maxlength: '7', value: p.accent || '', placeholder: '#1a73e8', 'aria-label': 'Accent colour', oninput: function () { p.accent = ac.value.trim(); } });
         return h('div', { class: 'partner', 'data-i': String(i) },
           h('div', { class: 'row2' }, field('Website name in the embed', nm), field('Label (letters, numbers, dashes)', sl)),
           field('Partner\u2019s own website address (optional)', ur, 'Leave empty if the partner lives on this website: stories then go to their copy at the embed link below. Otherwise use {slug} for the story name.'),
           h('div', { class: 'row2' }, field('Labelled stories and broadcasts', mn), field('Accent colour (optional)', ac)),
           field('Logo (replaces the name in the header; transparent PNG or SVG works best)', h('div', { class: 'uprow' }, lg, h('button', { class: 'btn', type: 'button', text: 'Upload logo', onclick: function () { file.click(); } }), file, pv)),
+          field('Access', pr, 'Every school copy is already kept out of Google. A password goes further: the pages are encrypted, so nobody can read them without it.'), prHint,
           h('p', { class: 'hint', text: 'Embed link: ' + embed }),
           h('div', { class: 'btnrow' }, copy, h('button', { class: 'btn danger', type: 'button', text: 'Remove', onclick: function () { V.partners.splice(i, 1); draw(); } })));
       }));
@@ -1283,7 +1287,7 @@
     draw();
     return h('section', { class: 'panel' }, h('h3', { text: 'Partners and embeds' }),
       h('p', { class: 'hint', text: 'Each partner gets a full copy of this website (articles, Live, polls, newsletter, search) under its own name that they can embed in an iframe. Put the partner\u2019s label on a story or a broadcast to send it to them. Save settings, then wait for the website to update.' }),
-      list, h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Add partner', onclick: function () { V.partners.push({ name: '', slug: '', url: '', main: 'redirect', accent: '', logo: '' }); draw(); } })));
+      list, h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Add partner', onclick: function () { V.partners.push({ name: '', slug: '', url: '', main: 'redirect', accent: '', logo: '', protect: '' }); draw(); } })));
   }
 
   function showSettings() {

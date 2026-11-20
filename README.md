@@ -343,3 +343,29 @@ The build writes, for every page: a title and description, canonical link, Open 
 - **Per article:** the article form has *Search and sharing* fields (search title, description, keywords). Run `supabase/seo.sql` once to add the columns.
 - **Whole site:** `seo` in Settings or `site.json`: `home_title`, `default_description`, `about` (your mission text, also used on the About page), `same_as` (links to your social profiles), `twitter_site`, `google_verification` and `bing_verification`.
 - **To rank:** add the site in Google Search Console and Bing Webmaster Tools, paste the verification codes in Settings, and submit `sitemap.xml`. Nobody can guarantee a number one ranking: it also depends on publishing good original articles regularly and on other sites linking to you.
+
+
+## Cookies, videos and motion
+
+- **Cookie banner.** First-time visitors choose *Accept all*, *Only necessary* or *Customise* (Preferences, Videos). With Preferences off, nothing such as dark mode, volume or closed announcements is written to the device. The choice is stored on the visitor's device and can be changed any time from **Cookie settings** in the footer. The site has no tracking and no ads.
+- **YouTube and Vimeo videos** are click-to-play: nothing is loaded from YouTube until the visitor presses play (or has chosen *Always play videos*). Every video shows a credit line: it is hosted by YouTube, we do not own it, it belongs to its creator and is shown with YouTube's official embed player. The Live page shows the same line for scheduled YouTube programmes.
+- **Motion.** Cards fade and slide in as you scroll, lift on hover, buttons ripple, articles show a reading-progress bar, and a back-to-top button appears. All of it switches off for visitors who ask their device for reduced motion.
+- **All articles page** at `/archive/` (linked in the footer and in the sitemap) and **`/llms.txt`**, a short guide for AI assistants. `llms.txt` is only written while *Block AI crawlers* is off.
+
+## Hiding school copies from Google and locking them
+
+Every school copy (`/p/<label>/`) is always kept out of search: `noindex, nofollow, noarchive, nosnippet, noimageindex`, blocked in `robots.txt`, left out of the sitemap, and never linked from your public pages.
+
+**Password protection.** In **Settings > Partners**, set *Access* to *Password protected*. When the site is built, every page of that school's copy is encrypted (AES-256-GCM, key from the password with PBKDF2, 200,000 rounds). Visitors see only an unlock screen. Without the password the stories cannot be read, by Google or anyone. The school's stories are also hidden on your public site.
+1. Choose a long password (10+ characters) and give it to the school.
+2. In GitHub: **Settings > Secrets and variables > Actions > New repository secret**. Name: `SPARK_PARTNER_PASSWORDS`. Value: `{"north-school":"a long password"}` (the label, then the password; add more schools with commas).
+3. Save the partner in the editor and wait for the rebuild.
+
+The password is deliberately not stored in the editor settings, because those are public. A school marked as protected but without a password in the secret is **not published at all**. To change a password, change the secret and rebuild (run *Build and deploy site* in GitHub Actions).
+
+Limits to know: the unlock is one shared password per school (not personal accounts), pictures that live at their own web addresses are not encrypted, and search inside a locked copy is switched off. It is strong for keeping stories private, but it is not a replacement for personal logins.
+
+**Other ways to protect a school, if you need more**
+* **Personal logins (Google / Microsoft school accounts):** put the school's domain behind Cloudflare Access (Cloudflare Zero Trust, free for up to 50 users). Visitors sign in with their school email, and you choose who is allowed. This is the strongest option and needs no code here.
+* **Who can publish:** the editor already has admin, editor and writer roles with Supabase sign-in; give school staff the writer role.
+* **The school's own website:** if a school hosts its own copy, its own hosting's login or password options apply.

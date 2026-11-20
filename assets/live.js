@@ -166,7 +166,7 @@
     var sp = spl[kind]; if (!sp) return;
     clearTimeout(sp.timer); delete spl[kind];
     var c = card(kind); if (!c) return;
-    c.querySelectorAll('.lyt').forEach(function (f) { f.remove(); });
+    c.querySelectorAll('.lyt').forEach(function (f) { f.remove(); }); c.querySelectorAll('.lcredit').forEach(function (n) { n.remove(); });
     var st = c.querySelector('.stage'); if (st) st.classList.remove('sched-on');
     var m = c.querySelector('.lmedia'); if (m && !rooms[kind]) { try { m.pause(); } catch (e) {} m.onloadedmetadata = null; m.removeAttribute('src'); try { m.load(); } catch (e) {} m.classList.remove('on'); }
     if (!keepMsg) setMsg(kind, '');
@@ -181,6 +181,7 @@
       f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
       f.src = 'https://www.youtube-nocookie.com/embed/' + it.yt_id + '?autoplay=1&start=' + off + '&rel=0&modestbranding=1&playsinline=1';
       var st = c.querySelector('.stage'); if (st) { st.appendChild(f); st.classList.add('sched-on'); } else c.insertBefore(f, c.querySelector('.ctl'));
+      if (!c.querySelector('.lcredit')) { var cr = document.createElement('p'); cr.className = 'vnote lcredit'; cr.textContent = 'Programme video from YouTube. We do not own it: it belongs to its creator and is shown with YouTube\u2019s official embed player, as its terms allow.'; (st || f).insertAdjacentElement('afterend', cr); }
     } else {
       var m = q(kind, '.lmedia'); m.srcObject = null; m.src = fileUrl(it.path);
       m.onloadedmetadata = function () { if (isFinite(m.duration) && off < m.duration - 2) { try { m.currentTime = off; } catch (e) {} } };
