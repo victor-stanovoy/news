@@ -181,6 +181,16 @@ def strip_tags(h):
     return re.sub(r"\s+", " ", html.unescape(h)).strip()
 
 
+def md_text(h):
+    """Article HTML -> plain Markdown-ish text (headings, lists, paragraphs) for AI assistants."""
+    h = re.sub(r"(?is)<(script|style).*?</\1>", " ", h or "")
+    h = re.sub(r"(?i)<h([1-6])[^>]*>", lambda m: "\n\n" + "#" * max(2, int(m.group(1))) + " ", h)
+    h = re.sub(r"(?i)<li[^>]*>", "\n- ", h)
+    h = re.sub(r"(?i)</(p|div|h[1-6]|ul|ol|blockquote|figure|tr)>|<br\s*/?>", "\n\n", h)
+    h = html.unescape(re.sub(r"(?s)<[^>]+>", "", h))
+    return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]+", " ", h)).strip()
+
+
 def clean_title(t):
     return (t or "").strip().strip("*").strip()
 
@@ -334,6 +344,16 @@ def linkify(escaped):
 
 def cat_hue(name):
     return int(hashlib.md5(name.encode()).hexdigest()[:4], 16) % 360
+
+
+# Full-screen shell for HTML (interactive) articles: the page fills the browser window, with one slim bar to get back.
+FS_CSS = ('<style>.top,.navbar,.ticker,.foot,.nlbox,.breaking{display:none!important}'
+          'html,body{height:100%;margin:0}main#main{padding:0;margin:0;max-width:none}'
+          '.fsx{position:fixed;inset:0;display:flex;flex-direction:column;background:#000;z-index:50}'
+          '.fsbar{flex:none;display:flex;align-items:center;gap:12px;padding:8px 14px;background:#110c4a;color:#fff;font:600 14px/1.2 system-ui,sans-serif}'
+          '.fsbar a{color:#fff;text-decoration:none;white-space:nowrap}'
+          '.fsbar .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85;font-weight:500}'
+          '.fsx iframe{flex:1;width:100%;border:0;background:#fff}</style>')
 
 
 # --------------------------------------------------------------------------- loading
@@ -809,7 +829,8 @@ class Site:
         if image and image.startswith("http"):
             og += f'<meta property="og:image" content="{esc(image)}"><meta name="twitter:card" content="summary_large_image">'
         if base and path:
-            og += f'<link rel="canonical" href="{esc(base + "/" + path)}"><meta property="og:url" content="{esc(base + "/" + path)}">'
+            canon = base + "/" + ("" if path == "index.html" else path)
+            og += f'<link rel="canonical" href="{esc(canon)}"><meta property="og:url" content="{esc(canon)}">'
         alt = "".join(f'<link rel="alternate" hreflang="{l}" href="{esc(base + "/" + u if base else u)}">' for l, u in (alts or []))
         icon = (f'<link rel="icon" type="image/png" sizes="64x64" href="{root}assets/favicon.png?v={asset_ver("favicon.png")}">'
                 f'<link rel="apple-touch-icon" href="{root}assets/apple-touch-icon.png?v={asset_ver("apple-touch-icon.png")}">'
@@ -970,6 +991,29 @@ class Site:
         return self.page("All articles", html_, "../", desc=f"Every article published on {cfg['site_name']}, newest first: {n} stories on science, technology, society and culture.",
                          path="archive/index.html", ld={k: v for k, v in ld.items() if v})
 
+    def ai_files_on(self):
+        seo = self.cfg["seo"]
+        return bool(self.cfg["base_url"]) and not self.embed and not self.locked() and bool(seo.get("indexing")) and not seo.get("block_ai_crawlers")
+
+    def article_md(self, a):
+        base = self.cfg["base_url"].rstrip("/")
+        meta = [f"Source: {self.cfg['site_name']}", f"URL: {base}/a/{a.slug}.html", f"Published: {a.date.date().isoformat()}"]
+        if a.updated and a.updated > a.date:
+            meta.append(f"Updated: {a.updated.date().isoformat()}")
+        meta.append(f"Section: {a.category}")
+        if a.author and not self.hide_names():
+            meta.append(f"Author: {a.author}")
+        head = [f"# {a.title}", ""] + ([f"_{a.subtitle}_", ""] if a.subtitle else [])
+        return "\n".join(head + ["\n".join(meta), "", md_text(a.body_html)]) + "\n"
+
+    def llms_full(self, skip=(), limit=60):
+        cfg = self.cfg
+        out = [f"# {cfg['site_name']}: full text of recent articles", "", f"> {cfg['seo'].get('about') or cfg['tagline']}", "",
+               "Quote with a link back to the URL given for each article.", ""]
+        for a in [x for x in self.arts if x.slug not in skip and not x.is_embed][:limit]:
+            out += ["---", "", self.article_md(a)]
+        return "\n".join(out)
+
     def llms_txt(self, skip=()):
         """llms.txt: a short plain-text guide for AI assistants (what this site is, where the articles are)."""
         cfg = self.cfg; seo = cfg["seo"]; base = cfg["base_url"].rstrip("/")
@@ -979,7 +1023,8 @@ class Site:
              "Articles may be quoted with a link back to the original page.", "", "## Start here", "",
              f"- [Home]({base}/): latest stories", f"- [About]({base}/about/index.html): who we are and our mission",
              f"- [All articles]({base}/archive/index.html): every article, newest first",
-             f"- [Sitemap]({base}/sitemap.xml)", f"- [RSS feed]({base}/feed.xml)", "", "## Sections", ""]
+             f"- [Sitemap]({base}/sitemap.xml)", f"- [RSS feed]({base}/feed.xml)",
+             f"- [Full text of the latest articles]({base}/llms-full.txt)", "", "## Sections", ""]
         o += [f"- [{c['name']}]({base}/c/{sl}.html)" for sl, c in self.cats.items()]
         o += ["", "## Latest articles", ""]
         o += [f"- [{a.title}]({base}/a/{a.slug}.html): {a.excerpt}" for a in [x for x in self.arts if x.slug not in skip and not x.is_embed][:40]]
@@ -1143,7 +1188,10 @@ class Site:
     def page(self, title, body, root, active="", **kw):
         if title == "" and not kw.get("ld"):
             base = self.cfg["base_url"].rstrip("/")
-            kw["ld"] = {"@context": "https://schema.org", "@type": "NewsMediaOrganization", "name": self.cfg["site_name"], "url": base or None,
+            kw["ld"] = {"@context": "https://schema.org", "@type": "NewsMediaOrganization", "@id": f"{base}/#org" if base else None,
+                        "name": self.cfg["site_name"], "alternateName": ["SparkNews", "Spark News"], "url": (base + "/") if base else None,
+                        "email": "press@sparknews.cc" if base else None,
+                        "contactPoint": {"@type": "ContactPoint", "contactType": "press", "email": "press@sparknews.cc"} if base else None,
                         "logo": (self.cfg["seo"].get("logo") or f"{base}/assets/logo.png") if base else None, "description": self.cfg["seo"].get("about") or self.cfg["tagline"],
                         "sameAs": self.cfg["seo"].get("same_as") or None,
                         "keywords": ", ".join(clean_keywords(self.cfg["seo"].get("keywords", ""), 30)) or None}
@@ -1315,8 +1363,9 @@ class Site:
             c = tr.get("content") or ""
             body_html = sanitize(c if re.search(r"<\w+[^>]*>", c) else plain_to_html(c))
         fname = a.slug + (f".{lang}" if lang else "")
+        fullscreen = bool(a.is_embed and not tr)       # HTML (interactive) articles open full screen by default
         same = [x for x in self.cats[a.cat_slug]["items"] if x is not a]
-        related = same[:3]
+        related = [] if fullscreen else same[:3]
         parts = []
 
         by = ""
@@ -1405,6 +1454,14 @@ class Site:
                          f'<a href="https://wa.me/?text={t}%20{share_url}" target="_blank" rel="noopener">WhatsApp</a>'
                          f'<a href="mailto:?subject={t}&amp;body={share_url}">Email</a></div>')
 
+        if fullscreen:
+            # the whole page becomes the HTML article: one slim bar to go back, then the content fills the window
+            sn, tt = esc(self.cfg["site_name"]), esc(title)
+            parts = [FS_CSS + f'<h1 class="sr">{tt}</h1><div class="fsx"><div class="fsbar">'
+                     f'<a href="{root}index.html">&larr; {sn}</a><span class="t">{tt}</span>'
+                     f'<a href="{a.slug}-embed.html">Open without bar</a></div>'
+                     f'<iframe src="{a.slug}-embed.html" title="{tt}" allowfullscreen></iframe></div>']
+
         dattr = f' lang="{lang}" dir="{"rtl" if lang in RTL_LANGS else "ltr"}"' if lang else ""
         inner = "".join(parts)
         if not self.locked():
@@ -1422,13 +1479,19 @@ class Site:
         ld = {"@context": "https://schema.org", "@type": "NewsArticle", "headline": title[:110], "datePublished": a.date.isoformat(),
               "description": desc, "author": ({"@type": "Organization", "name": self.cfg["privacy"].get("byline") or self.cfg["site_name"]} if self.hide_names() or not a.author
                                    else {"@type": "Person", "name": a.author}),
-              "publisher": {"@type": "Organization", "name": self.cfg["site_name"]}}
-        if self.cfg["base_url"]:
-            ld["publisher"]["logo"] = {"@type": "ImageObject", "url": self.cfg["seo"].get("logo") or self.cfg["base_url"].rstrip("/") + "/assets/logo.png"}
-        if a.updated: ld["dateModified"] = a.updated.isoformat()
+              "publisher": {"@type": "NewsMediaOrganization", "name": self.cfg["site_name"]}}
+        if base:
+            ld["publisher"].update({"@id": f"{base}/#org", "url": base + "/",
+                                    "logo": {"@type": "ImageObject", "url": self.cfg["seo"].get("logo") or base + "/assets/logo.png"}})
+        ld["dateModified"] = (a.updated if a.updated and a.updated >= a.date else a.date).isoformat()
+        ld["inLanguage"] = lang or self.cfg["language"]
+        ld["isAccessibleForFree"] = True
+        ld["wordCount"] = a.words
         ld["keywords"] = ", ".join(clean_keywords(kws + clean_keywords(self.cfg["seo"].get("keywords", ""), 30), 25))
         ld["articleSection"] = a.category
         if src and src.startswith("http"): ld["image"] = [src]
+        if "image" not in ld and base:      # Google wants an image on every NewsArticle
+            ld["image"] = [self.cfg["seo"].get("default_image") or base + "/assets/og-default.png"]
         if base: ld["mainEntityOfPage"] = f"{base}/a/{fname}.html"
         if base:
             ld = [ld, {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
@@ -1437,7 +1500,8 @@ class Site:
                 {"@type": "ListItem", "position": 3, "name": title[:110]}]}]
         meta = (f'<meta property="article:published_time" content="{a.date.isoformat()}">'
                 f'<meta property="article:modified_time" content="{(a.updated if a.updated and a.updated >= a.date else a.date).isoformat()}">'
-                f'<meta property="article:section" content="{esc(a.category)}">')
+                f'<meta property="article:section" content="{esc(a.category)}">'
+                + (f'<link rel="alternate" type="text/markdown" href="{a.slug}.md">' if not lang and self.ai_files_on() and not a.is_embed else ""))
         return self.page(title, art, root, active=a.cat_slug, desc=desc, image=src, kind="article",
                          path=f"a/{fname}.html", alts=alts, ld=ld, keywords=kws, seo_title="" if tr else a.seo_title, meta=meta)
 
@@ -1493,7 +1557,7 @@ class Site:
             if mod: x += f"<lastmod>{mod.strftime('%Y-%m-%d')}</lastmod>"
             if img and str(img).startswith("http"): x += f"<image:image><image:loc>{esc(img)}</image:loc></image:image>"
             return x + "</url>"
-        rows = [u(f"{base}/index.html"), u(f"{base}/about/index.html"), u(f"{base}/archive/index.html")] + [u(f"{base}/c/{s}.html") for s in self.cats]
+        rows = [u(f"{base}/"), u(f"{base}/about/index.html"), u(f"{base}/archive/index.html")] + [u(f"{base}/c/{s}.html") for s in self.cats]
         for a in self.arts:
             if a.is_embed or a.slug in skip: continue
             mod = a.updated or a.date
@@ -1645,6 +1709,9 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     for f in ROOT.glob("google*.html"):      # Google Search Console "HTML file" ownership proof: must sit at the top of the site
         if re.fullmatch(r"google[0-9a-f]{10,32}\.html", f.name):
             shutil.copy(f, out / f.name)
+    for f in ROOT.glob("*.txt"):             # IndexNow key file: <32 hex characters>.txt, must sit at the top of the site
+        if re.fullmatch(r"[0-9a-f]{32}\.txt", f.name):
+            shutil.copy(f, out / f.name)
     img_dir = ARTICLES_DIR / "images"
     if img_dir.exists():
         shutil.copytree(img_dir, out / "images")
@@ -1702,6 +1769,12 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
             w(f"a/{a.slug}-embed.html", site.embed_page(a))
         for lang in a.translations:
             w(f"a/{a.slug}.{lang}.html", site.article(a, lang))
+    if site.ai_files_on():
+        for a in arts:
+            if a.slug in redirects or a.is_embed:
+                continue
+            (out / "a" / f"{a.slug}.md").write_text(site.redact(site.article_md(a)), encoding="utf-8")
+        (out / "llms-full.txt").write_text(site.redact(site.llms_full(redirects)), encoding="utf-8")
     w("search.json", json.dumps([{
         "t": a.title, "s": a.subtitle, "c": a.category, "d": a.date.isoformat(), "df": fmt_date(a.date),
         "e": a.excerpt, "u": f"a/{a.slug}.html",
