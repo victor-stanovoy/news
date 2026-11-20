@@ -91,7 +91,7 @@ DEFAULT_CONFIG = {
     "announcements": [],            # notices for visitors: bar or pop-up, with start and end (editor, Settings)
     "maintenance": {"enabled": False, "title": "", "message": "", "eta": "", "salt": "", "hash": "", "iter": 150000},   # "be right back" page with a password bypass
     "polls": {"enabled": True},     # visitor polls: card or full-screen banner (set up in the editor first, needs supabase/polls.sql)
-    "live": {"enabled": True},      # "Live" page for live radio and TV (needs the database and supabase/live.sql)
+    "live": {"enabled": True, "banner": False},      # "Live" page for live radio and TV (needs the database and supabase/live.sql); banner = "We are live" bar on every page while something is on air
     "supabase": {"url": "", "anon_key": ""},   # the editor and database; both values are safe to publish
     "ticker": {
         "enabled": True,            # scrolling headline bar under the menu
@@ -580,8 +580,8 @@ def clean_settings(d):
         out["partners"] = ps
     if isinstance(d.get("polls"), dict) and "enabled" in d["polls"]:
         out["polls"] = {"enabled": bool(d["polls"]["enabled"])}
-    if isinstance(d.get("live"), dict) and "enabled" in d["live"]:
-        out["live"] = {"enabled": bool(d["live"]["enabled"])}
+    if isinstance(d.get("live"), dict) and ("enabled" in d["live"] or "banner" in d["live"]):
+        out["live"] = {k: bool(d["live"][k]) for k in ("enabled", "banner") if k in d["live"]}
     t = d.get("ticker")
     if isinstance(t, dict):
         o = {}
@@ -997,7 +997,9 @@ class Site:
             if self.nl_on():
                 li.append("<li><b>Newsletter.</b> If you sign up, we store your email address (and name, if given) to send the newsletter. You confirm by email first and every email has an unsubscribe link, which deletes nothing else about you because nothing else is collected.</li>")
             if self.live_on():
-                li.append("<li><b>Live radio and TV.</b> Pressing play connects your browser to our streaming provider (LiveKit), which sees your IP address.</li>")
+                li.append("<li><b>Live radio and TV.</b> Pressing play connects your browser to our streaming provider (LiveKit), which sees your IP address. If we play a YouTube video on air, YouTube&rsquo;s player (privacy-enhanced mode) also loads while you watch, and YouTube then sees your IP address.</li>")
+                if self.cfg["live"].get("banner"):
+                    li.append("<li><b>Live banner.</b> While you read, your browser asks our database every 30 seconds whether a broadcast is on air, so we can show a &ldquo;We are live&rdquo; banner. The database sees your IP address; nothing is stored about you.</li>")
             li.append("<li><b>Articles.</b> Embedded videos (YouTube, privacy-enhanced mode) load only on pages that include one; the provider then sees your IP address. Share buttons contact the social network only when you click them.</li>")
         if self.hide_names():
             li.append("<li><b>Our team.</b> Names of individual authors and editors are not published on this site; articles are credited to the newsroom.</li>")
@@ -1121,7 +1123,7 @@ class Site:
         data = {"items": [x for x, _ in self.ticker_entries(root)], "tab": t["tab"]}
         if self.live_on():
             u, k = db_settings(self.cfg)
-            data["live"] = {"url": u, "key": k}
+            data["live"] = {"url": u, "key": k, "banner": bool(self.cfg["live"].get("banner")), "embed": self.embed}
         nl_tag = ""
         if self.nl_on():
             u, k = db_settings(self.cfg)
