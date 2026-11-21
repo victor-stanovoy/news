@@ -305,3 +305,17 @@ body.focusing{overflow:hidden}
 
 .airpill{position:fixed;left:12px;bottom:12px;z-index:90;max-width:min(520px,calc(100vw - 24px));padding:8px 12px;background:#110c4a;color:#fff;font-size:13px;border-left:4px solid #2fbf71}
 .airpill.warn{border-left-color:#fe2c55;background:#4a0c1a}
+
+/* studio navigation */
+.studiobar{position:sticky;top:107px;z-index:29;background:var(--bg,#fff);padding:10px 0;margin:0 0 8px;border-bottom:1px solid var(--line,#e3e3e3);flex-wrap:wrap}
+.studiobar .chanlab{display:flex;gap:8px;align-items:center;font-weight:700;font-size:13px}.studiobar .chanlab select{min-width:180px}
+.studiobar .big{min-width:150px}
+.secnav{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px;position:sticky;top:170px;z-index:28;background:var(--bg,#fff);padding:6px 0}
+.secnav a{padding:5px 11px;border:1px solid var(--line,#ccc);font-size:13px;text-decoration:none;color:inherit;transition:background .2s,color .2s}
+.secnav a:hover,.secnav a.now{background:#110c4a;color:#fff;border-color:#110c4a}
+.studiodash section.panel{scroll-margin-top:240px;transition:box-shadow .4s}
+.studiodash section.panel.flash{box-shadow:0 0 0 3px #fe2c55}
+.colh{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.colbtn{font:inherit;background:none;border:0;cursor:pointer;padding:0 4px;color:inherit}
+.panel.collapsed>*:not(h3){display:none}.panel.collapsed .studiogrid{display:none}
+@media (max-width:820px){.studiobar{top:107px}.secnav{top:210px;overflow-x:auto;flex-wrap:nowrap}.secnav a{white-space:nowrap}}

@@ -1411,6 +1411,7 @@
       var gHost = h('div', { class: 'guesthost' });
       Promise.all([loadScript('../assets/vendor/qrcode.js'), loadScript('../assets/greenroom.js?v=' + ((cfg.ver || {}).green || ''))]).then(function () {
         gHost.replaceChildren(window.SparkGreen.mount({ h: h, sb: sb, comp: comp, kind: kind, toast: toast, errText: errText, site: cfg.site || {}, loadScript: loadScript, loadLiveKit: loadLiveKit, token: liveToken, micId: function () { return S.mic; }, getMixer: function () { return onAir[kind] && onAir[kind].mixer; }, showGuest: function (scene, id) { comp.guestSel = [id].concat(comp.guestSel.filter(function (x) { return x !== id; })); setScene(scene); } }).el);
+        if (window.__studioNav) window.__studioNav();
       }).catch(function () { gHost.replaceChildren(h('p', { class: 'hint err', text: 'The guest tools could not load. Reload the page.' })); });
       return h('div', {}, box, gHost);
     }
@@ -1424,11 +1425,17 @@
     var chanSel = h('select', { 'aria-label': 'Channel', onchange: function () { try { localStorage.setItem('spark-chan-' + type, chanSel.value); } catch (e) {} location.hash = '#/' + type + '/' + chanSel.value; } },
       mine.map(function (c) { return h('option', { value: c.slug, text: c.name + (c.topic ? ' (' + c.topic + ')' : '') + (onAir[c.slug] ? '  ● ON AIR' : '') }); }));
     chanSel.value = kind;
-    var chanBar = h('div', { class: 'chanbar' }, h('label', { text: 'Channel' }), chanSel,
+    var chanBar = h('div', { class: 'chanbar' },
       me.role === 'admin' ? h('a', { class: 'btn', href: '#/schedule', text: 'Add or edit channels' }) : null,
       h('a', { class: 'btn', href: '#/schedule/' + kind, text: 'Open this channel’s schedule' }));
-    return h('div', { class: 'dash' },
-      h('div', { class: 'dashhead' }, h('h2', { text: isTv ? 'TV studio' : 'Radio studio' }), badge, timer),
+    /* a bar that stays at the top while you scroll: channel, state, and the go-live button, so it is always one click away */
+    var goMirror = h('button', { class: 'btn big', type: 'button', onclick: function () { go.click(); } });
+    function syncGo() { goMirror.textContent = go.textContent; goMirror.className = go.className.replace('primary wide', 'primary'); goMirror.disabled = go.disabled; }
+    syncGo(); try { new MutationObserver(syncGo).observe(go, { childList: true, characterData: true, subtree: true, attributes: true }); } catch (e) { /* older browser */ }
+    var navEl = h('nav', { class: 'secnav', 'aria-label': 'Jump to a section' });
+    var dash = h('div', { class: 'dash studiodash' },
+      h('div', { class: 'dashhead studiobar' }, h('h2', { text: isTv ? 'TV studio' : 'Radio studio' }), badge, timer, h('span', { class: 'sp' }), h('label', { class: 'chanlab' }, h('span', { text: 'Channel' }), chanSel), goMirror),
+      navEl,
       chanBar,
       h('div', { class: 'dashgrid' },
         h('section', { class: 'panel' }, h('h3', { text: 'Broadcast' }),
@@ -1439,6 +1446,39 @@
           opt('echo', 'Echo cancellation'), opt('noise', 'Noise suppression'), opt('agc', 'Automatic volume levelling'),
           h('p', { class: 'hint', text: 'Use headphones when you test so the radio does not echo into your microphone.' })),
         studio, isTv ? ytPanel(kind, stops) : null, musicPanel(kind, S, save, stops), padsPanel(kind, S, save, stops)));
+    window.__studioNav = function () { studioNav(dash, navEl, type); };
+    studioNav(dash, navEl, type);
+    return dash;
+  }
+
+  /* jump chips + collapsible panels for the studio windows (what is collapsed is remembered in this browser) */
+  function studioNav(dash, navEl, type) {
+    var secs = [].slice.call(dash.querySelectorAll('section.panel')).filter(function (x) { return x.querySelector('h3'); });
+    function label(sec) { if (!sec.dataset.lbl) sec.dataset.lbl = sec.querySelector('h3').textContent.split(/[:(]/)[0].replace(/[\u25b8\u25be]/g, '').trim(); return sec.dataset.lbl; }
+    function key(sec) { return 'spark-col-' + type + '-' + label(sec).toLowerCase().replace(/\W+/g, '-'); }
+    secs.forEach(function (sec, i) {
+      sec.id = sec.id || 'sec-' + type + '-' + i;
+      var h3 = sec.querySelector('h3');
+      if (!sec.dataset.col) {
+        sec.dataset.col = '1';
+        var b = document.createElement('button'); b.type = 'button'; b.className = 'colbtn'; b.setAttribute('aria-label', 'Collapse or expand ' + label(sec));
+        function paintCol() { var c = sec.classList.contains('collapsed'); b.textContent = c ? '\u25b8' : '\u25be'; b.setAttribute('aria-expanded', c ? 'false' : 'true'); }
+        b.onclick = function () { sec.classList.toggle('collapsed'); try { localStorage.setItem(key(sec), sec.classList.contains('collapsed') ? '1' : '0'); } catch (e) { /* ignore */ } paintCol(); };
+        h3.insertBefore(b, h3.firstChild); h3.classList.add('colh');
+        h3.addEventListener('click', function (e) { if (e.target === h3) b.click(); });
+        try { if (localStorage.getItem(key(sec)) === '1' && i > 1) sec.classList.add('collapsed'); } catch (e) { /* ignore */ }
+        paintCol();
+      }
+    });
+    navEl.replaceChildren.apply(navEl, secs.map(function (sec) {
+      var a = document.createElement('a'); a.href = '#' + sec.id; a.textContent = label(sec); a.dataset.for = sec.id;
+      a.onclick = function (e) { e.preventDefault(); sec.classList.remove('collapsed'); var cb = sec.querySelector('.colbtn'); if (cb) { cb.textContent = '\u25be'; cb.setAttribute('aria-expanded', 'true'); } sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); sec.classList.add('flash'); setTimeout(function () { sec.classList.remove('flash'); }, 900); };
+      return a;
+    }));
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (l) { l.forEach(function (x) { var a = navEl.querySelector('[data-for="' + x.target.id + '"]'); if (a) a.classList.toggle('now', x.isIntersecting); }); }, { rootMargin: '-250px 0px -60% 0px' });
+      secs.forEach(function (sec) { io.observe(sec); });
+    }
   }
 
   /* ---------------------------------------------------------------- newsletter window */
