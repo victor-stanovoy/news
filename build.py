@@ -939,6 +939,126 @@ def build_previews(site, out):
     print(f"Share previews: {len(site.previews)} pictures")
 
 
+# ---------- translated copies of the fixed pages (About, Privacy), made at build time ----------
+# Each paragraph is translated once and remembered in data/translations.json (GitHub keeps that file between builds), so a normal build makes no requests.
+# The visitor's browser never contacts a translation service. The English page is always the original.
+PAGE_LANGS = ("ar", "zh", "fr", "ru", "es", "de")
+_TR = {"data": None, "t0": None, "dead": False}
+_TR_FILE = ROOT / "data" / "translations.json"
+_TR_LANGCODE = {"zh": "zh-CN"}
+
+
+def _tr_get(text, lang):
+    if _TR["data"] is None:
+        try:
+            _TR["data"] = json.loads(_TR_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            _TR["data"] = {}
+    key = hashlib.sha1((lang + "\n" + text).encode("utf-8")).hexdigest()[:20]
+    if key in _TR["data"]:
+        return _TR["data"][key]
+    if _TR["dead"] or os.environ.get("SPARK_NO_TRANSLATE") or os.environ.get("SPARK_PREVIEW_OFFLINE"):
+        return None
+    if _TR["t0"] is None:
+        _TR["t0"] = time.time()
+    if time.time() - _TR["t0"] > 120:
+        _TR["dead"] = True
+        return None
+    out = None
+    if os.environ.get("SPARK_FAKE_TRANSLATE"):
+        out = "[%s] %s" % (lang, text)
+    else:
+        code = _TR_LANGCODE.get(lang, lang)
+        for attempt in range(2):
+            try:
+                url = "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=en&tl=%s&q=%s" % (code, urllib.parse.quote(text))
+                with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=8) as r:
+                    j = json.loads(r.read().decode("utf-8"))
+                out = "".join(seg[0] for seg in j[0] if seg and seg[0])
+                break
+            except Exception:
+                time.sleep(0.5)
+        if not out:
+            try:
+                url = "https://api.mymemory.translated.net/get?q=%s&langpair=en|%s" % (urllib.parse.quote(text[:480]), code)
+                with urllib.request.urlopen(url, timeout=10) as r:
+                    j = json.loads(r.read().decode("utf-8"))
+                if int(j.get("responseStatus", 0)) == 200:
+                    out = html.unescape(j["responseData"]["translatedText"])
+            except Exception:
+                out = None
+        if not out:
+            _TR["dead"] = _TR.get("fails", 0) >= 3
+            _TR["fails"] = _TR.get("fails", 0) + 1
+            return None
+    _TR["data"][key] = out
+    return out
+
+
+def _tr_save():
+    if _TR["data"]:
+        try:
+            _TR_FILE.parent.mkdir(exist_ok=True)
+            _TR_FILE.write_text(json.dumps(_TR["data"], ensure_ascii=False, indent=0, sort_keys=True), encoding="utf-8")
+        except Exception:
+            pass
+
+
+def _tr_block(inner, lang):
+    """Translate one paragraph that may hold <b> or <a> tags: the tags travel as numbered markers and must all come back, or the block stays English."""
+    parts = re.split(r"(</?[a-zA-Z][^>]*>)", inner)
+    tags, stack, text, n = {}, [], "", 0
+    for part in parts:
+        if re.match(r"</[a-zA-Z]", part):
+            i = stack.pop() if stack else 0
+            text += "[[/%d]]" % i
+        elif re.match(r"<[a-zA-Z]", part):
+            n += 1; tags[n] = part; stack.append(n); text += "[[%d]]" % n
+        else:
+            text += html.unescape(part)
+    if not text.strip():
+        return inner
+    t = _tr_get(text, lang)
+    if not t:
+        return None
+    for i in range(1, n + 1):
+        if t.count("[[%d]]" % i) != 1 or t.count("[[/%d]]" % i) != 1:
+            return None
+    pieces = re.split(r"(\[\[\s*/?\s*\d+\s*\]\])", t)
+    out = []
+    for k, part in enumerate(pieces):
+        if k % 2 == 0:
+            out.append(html.escape(part, quote=False))
+        else:
+            d = int(re.search(r"\d+", part).group())
+            tag = tags.get(d, "")
+            out.append(tag if "/" not in part else "</%s>" % (re.match(r"<([a-zA-Z0-9]+)", tag).group(1) if tag else "span"))
+    return "".join(out)
+
+
+def translated_page(body_html, root_note=""):
+    """Wrap a page's content: the English original plus one hidden translated copy per language; assets/i18n.js shows the visitor's language."""
+    if os.environ.get("SPARK_NO_TRANSLATE"):
+        return body_html
+    copies = []
+    for lang in PAGE_LANGS:
+        ok = [0, 0]
+
+        def one(m):
+            ok[1] += 1
+            r = _tr_block(m.group(3), lang)
+            if r is None:
+                return m.group(0)
+            ok[0] += 1
+            return "<%s%s>%s</%s>" % (m.group(1), m.group(2), r, m.group(1))
+        t = re.sub(r"<(h[1-6]|p|li)((?:\s[^>]*)?)>(.*?)</\1>", one, body_html, flags=re.S)
+        if ok[1] and ok[0] / ok[1] >= 0.7:                 # mostly translated: worth offering
+            copies.append('<div data-tr="%s" lang="%s"%s hidden>%s</div>' % (lang, lang, ' dir="rtl"' if lang == "ar" else "", t))
+    if not copies:
+        return body_html
+    return '<div data-orig>%s</div>%s' % (body_html, "".join(copies))
+
+
 class Site:
     def __init__(self, cfg, arts, now):
         self.cfg, self.arts, self.now = cfg, arts, now
@@ -1158,6 +1278,8 @@ class Site:
                 '<h2>School media partners</h2><p>Beyond our main publication, we partner with schools to establish and power their own student media platforms. Students write articles, conduct interviews, report on their communities and explore radio, television and digital publishing. Each school platform has its own identity and editorial focus, with the infrastructure, guidance and support of SparkNews behind it.</p>'
                 '<h2>Our mission</h2><p>To make journalism more accessible, encourage independent thinking and give new voices the opportunity to be heard.</p>'
                 f'<p><a href="../index.html">Read the latest stories &rarr;</a></p></div>')
+        body = body.replace('<div class="wrap narrow aboutpage">', '<div class="wrap narrow aboutpage">', 1)
+        body = '<div class="wrap narrow aboutpage">' + translated_page(body[len('<div class="wrap narrow aboutpage">'):-len('</div>')]) + '</div>'
         ld = {"@context": "https://schema.org", "@type": "AboutPage", "name": f"About {cfg['site_name']}", "url": f"{base}/about/" if base else None,
               "mainEntity": {"@id": f"{base}/#org"} if base else None}
         return self.page("About", body, "../", desc=(seo.get("about") or cfg["tagline"])[:200], path="about/index.html", ld={k: v for k, v in ld.items() if v})
@@ -1244,6 +1366,8 @@ class Site:
         li.append("<li><b>No tracking.</b> This site has no analytics, advertising cookies or fingerprinting.</li>")
         who = f'<p>Questions about your data, or want your newsletter record deleted? Write to <a href="mailto:{esc(cfg["privacy"]["contact"])}">{esc(cfg["privacy"]["contact"])}</a>.</p>' if cfg["privacy"].get("contact") else ""
         body = f'<div class="wrap prefspage"><h1>Privacy</h1><p class="lead">What {esc(cfg["site_name"])} stores about you, in plain words.</p><ul class="privlist">{"".join(li)}</ul>{who}</div>'
+        head_len = len('<div class="wrap prefspage">')
+        body = '<div class="wrap prefspage">' + translated_page(body[head_len:-len('</div>')]) + '</div>'
         return self.page("Privacy", body, "../")
 
     def badge_page(self):
@@ -1938,6 +2062,7 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
         shutil.copytree(img_dir, out / "images")
 
     build_previews(site, out)
+    # (translated copies of About and Privacy are made while those pages are built below)
 
     def w(p, s):
         if not p.startswith("editor/") and p.endswith((".html", ".json", ".xml")):
@@ -1960,6 +2085,7 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     w("privacy/index.html", site.privacy_page())
     (out / "about").mkdir()
     w("about/index.html", site.about_page())
+    _tr_save()
     if not site.embed:
         (out / "archive").mkdir()
         w("archive/index.html", site.archive_page(redirects))

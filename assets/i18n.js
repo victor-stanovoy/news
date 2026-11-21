@@ -146,9 +146,25 @@
     else { html.removeAttribute('data-ui'); html.setAttribute('dir', RTL[base] ? 'rtl' : 'ltr'); }
     if (!document.querySelector('main[data-page=article][lang]')) html.setAttribute('lang', lang);   /* a translated article keeps its own language */
     walk(document.body, lang);
+    pages(lang);
     busy = false;
     var sel = document.querySelector('.uilang select'); if (sel) sel.value = lang;
     var ps = document.getElementById('ui-lang-pref'); if (ps) ps.value = stored() || 'auto';
+  }
+  /* fixed pages (About, Privacy) carry a translated copy per language, made when the site was built */
+  function pages(lang) {
+    var blocks = document.querySelectorAll('[data-tr]'); if (!blocks.length) return;
+    var orig = document.querySelector('[data-orig]'), any = false;
+    [].forEach.call(blocks, function (b) {
+      var on = b.getAttribute('data-tr') === lang && lang !== base; b.hidden = !on; any = any || on;
+      if (on && !b.querySelector('.trnote')) {
+        var n = document.createElement('p'); n.className = 'trnote'; n.setAttribute('data-no-i18n', '');
+        var a = document.createElement('a'); a.href = '#'; a.textContent = D['Read the original'][ORDER.indexOf(lang)];
+        a.addEventListener('click', function (e) { e.preventDefault(); set('en'); });
+        n.appendChild(document.createTextNode(D['This is an automatic translation.'][ORDER.indexOf(lang)] + ' ')); n.appendChild(a); b.insertBefore(n, b.firstChild);
+      }
+    });
+    if (orig) orig.hidden = any;
   }
   function set(lang) {
     try { if (lang === 'auto') localStorage.removeItem('spark-lang'); else localStorage.setItem('spark-lang', lang); } catch (e) {}

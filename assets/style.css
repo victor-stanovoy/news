@@ -740,3 +740,5 @@ time,.ltime,.airtime,.ctime{font-variant-numeric:tabular-nums}
   .body a{color:#000;text-decoration:underline}.body a[href^="http"]::after{content:" (" attr(href) ")";font-size:.8em;opacity:1}
   img{max-width:100%;break-inside:avoid;filter:none!important}h1,h2,h3{break-after:avoid}
 }
+.trnote{font-size:13px;color:var(--muted);border-inline-start:3px solid var(--spark);padding:4px 10px;margin:0 0 18px}
+[data-tr][hidden],[data-orig][hidden]{display:none!important}

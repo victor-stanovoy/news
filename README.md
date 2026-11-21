@@ -402,3 +402,6 @@ The guest page is not indexed by search engines. One-time setup (already done fo
 ## Small comforts on the website
 
 Everything is flat colour: no gradients anywhere (the old ones were replaced). New touches: a **Text size** choice (smaller, standard, larger) on the Settings page; a **Copy link** button next to the share links; the section bar tucks away while you read down and returns when you scroll up; press **/** to jump to search; links to other websites get a small arrow; the browser's address bar takes the colour of the chosen look; a tidy **print** layout (just the article); sharper focus outlines for keyboard users, brand-coloured selection and form controls; and reading text that wraps more evenly.
+
+## Translated About and Privacy pages
+When the site is built, the About and Privacy pages are machine-translated into Arabic, Chinese, French, Russian, Spanish and German and stored hidden in the page. Visitors who pick one of those languages see the translated copy with a "Read the original" link. Translations are cached in `data/translations.json` (kept between builds by the workflow's cache step), so only changed text is translated again. Set `SPARK_NO_TRANSLATE=1` to skip this.
