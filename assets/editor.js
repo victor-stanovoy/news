@@ -7,10 +7,23 @@
   var app = document.getElementById('app');
   var LANGS = { ar: 'العربية', zh: '中文', fr: 'Français', ru: 'Русский', es: 'Español', de: 'Deutsch', it: 'Italiano',
     pt: 'Português', ja: '日本語', ko: '한국어', tr: 'Türkçe', pl: 'Polski', nl: 'Nederlands', uk: 'Українська', en: 'English' };
-  /* Free automatic translation (MyMemory, no account or key). Whole sentences go out in small batches; HTML tags stay untouched.
-     Limits: about 5,000 characters a day per internet connection, so very long articles may need a second day. Quality is "good enough to read": ask a person to check. */
+  /* Free automatic translation, no account or key. First choice: Google's public translate endpoint (better quality, no daily limit we know of,
+     but unofficial so it can change). If it does not answer we fall back to MyMemory (about 5,000 characters a day per connection).
+     Names you list stay untouched, and a paragraph with bold/italic/links is translated as one sentence so the grammar stays right.
+     "Good enough to read": a person should still check it before it is published. */
   var MM = { zh: 'zh-CN', pt: 'pt-PT' };
   function mmCode(l) { return MM[l] || l; }
+  var protectTerms = [], engine = { g: true };
+  function decode(t) { var d = document.createElement('textarea'); d.innerHTML = t; return d.value; }
+  function gOne(text, from, to) {
+    return fetch('https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=' + encodeURIComponent(from) + '&tl=' + encodeURIComponent(mmCode(to)) + '&q=' + encodeURIComponent(text)).then(function (r) {
+      if (!r.ok) throw new Error('g' + r.status);
+      return r.json();
+    }).then(function (j) {
+      if (!j || !j[0]) throw new Error('gempty');
+      return j[0].map(function (x) { return x && x[0] || ''; }).join('');
+    });
+  }
   function mmOne(text, from, to) {
     return fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=' + encodeURIComponent(mmCode(from) + '|' + mmCode(to))).then(function (r) {
       if (!r.ok) throw new Error('The translation service is not answering (' + r.status + ').');
@@ -19,32 +32,86 @@
       var st = Number(j.responseStatus);
       if (st === 429 || /QUOTA|LIMIT/i.test(String(j.responseDetails || ''))) throw new Error('The free daily translation limit is used up. Try again tomorrow, or translate fewer languages at once.');
       if (st !== 200) throw new Error(String(j.responseDetails || 'The translation failed.'));
-      var t = String((j.responseData && j.responseData.translatedText) || '');
-      var d = document.createElement('textarea'); d.innerHTML = t;     /* the service returns HTML entities */
-      return d.value || text;
+      return decode(String((j.responseData && j.responseData.translatedText) || '')) || text;
     });
   }
-  function chunk(text) {         /* pieces of at most ~450 characters, cut at sentence ends */
-    var out = [], cur = '';
-    (text.match(/[^.!?\u3002]+[.!?\u3002]*\s*/g) || [text]).forEach(function (sn) {
-      if (sn.length > 450) { if (cur) { out.push(cur); cur = ''; } for (var i = 0; i < sn.length; i += 450) out.push(sn.slice(i, i + 450)); return; }
-      if ((cur + sn).length > 450) { out.push(cur); cur = sn; } else cur += sn;
+  function tOne(text, from, to) {
+    var terms = protectTerms.filter(function (t) { return t && text.toLowerCase().indexOf(t.toLowerCase()) >= 0; }), safe = text;
+    terms.forEach(function (t, i) { safe = safe.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'ZQ' + i + 'X'); });
+    var run = engine.g ? gOne(safe, from, to).catch(function () { engine.g = false; return mmOne(safe, from, to); }) : mmOne(safe, from, to);
+    return run.then(function (t) {
+      terms.forEach(function (term, i) { t = t.replace(new RegExp('ZQ\\s*' + i + '\\s*X', 'gi'), term); });
+      return t;
+    });
+  }
+  function chunk(text) {         /* pieces cut at sentence ends: long for Google, short for MyMemory */
+    var max = engine.g ? 1500 : 450, out = [], cur = '';
+    (text.match(/[^.!?。]+[.!?。]*\s*/g) || [text]).forEach(function (sn) {
+      if (sn.length > max) { if (cur) { out.push(cur); cur = ''; } for (var i = 0; i < sn.length; i += max) out.push(sn.slice(i, i + max)); return; }
+      if ((cur + sn).length > max) { out.push(cur); cur = sn; } else cur += sn;
     });
     if (cur) out.push(cur); return out;
   }
   function mmText(text, from, to) {
     if (!text.trim()) return Promise.resolve(text);
     var lead = (text.match(/^\s*/) || [''])[0], tail = (text.match(/\s*$/) || [''])[0], parts = chunk(text.trim()), res = [];
-    return parts.reduce(function (p, part, i) { return p.then(function () { return mmOne(part, from, to).then(function (t) { res[i] = t; }); }); }, Promise.resolve())
+    return parts.reduce(function (p, part, i) { return p.then(function () { return tOne(part, from, to).then(function (t) { res[i] = t; }); }); }, Promise.resolve())
       .then(function () { return lead + res.join(' ') + tail; });
   }
+  var INLINE = /^(A|B|I|U|EM|STRONG|SPAN|MARK|SMALL|SUB|SUP)$/, BLOCK = /^(P|LI|H[1-6]|BLOCKQUOTE|FIGCAPTION|TD|TH)$/;
+  function inlineOnly(el) { return [].every.call(el.querySelectorAll('*'), function (c) { return INLINE.test(c.nodeName); }); }
+  function hasInline(el) { return !!el.querySelector('*'); }
+  /* a paragraph with inline tags goes out as one sentence with markers [[1]]..[[/1]] where the tags were */
+  function markBlock(el) {
+    var tags = [], n = 0;
+    function walk(node) {
+      var o = '';
+      [].forEach.call(node.childNodes, function (c) {
+        if (c.nodeType === 3) o += c.nodeValue;
+        else if (c.nodeType === 1) { var id = ++n, shell = c.cloneNode(false).outerHTML.replace(/<\/[^>]+>$/, ''); tags[id] = { open: shell, close: '</' + c.nodeName.toLowerCase() + '>' }; o += '[[' + id + ']]' + walk(c) + '[[/' + id + ']]'; }
+      });
+      return o;
+    }
+    return { text: walk(el), tags: tags, count: n };
+  }
+  function unmark(t, m) {
+    for (var i = 1; i <= m.count; i++) { if (t.indexOf('[[' + i + ']]') < 0 || t.indexOf('[[/' + i + ']]') < 0) return null; }
+    t = t.split(/(\[\[\s*\/?\s*\d+\s*\]\])/).map(function (seg, k) {
+      if (k % 2 === 0) return mEsc(seg);
+      var d = seg.match(/\d+/)[0], close = /\//.test(seg); return m.tags[d] ? (close ? m.tags[d].close : m.tags[d].open) : '';
+    }).join('');
+    return t;
+  }
+  function mEsc(t) { return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function mmHtml(html, from, to, progress) {      /* translate the text inside the tags, keep the tags */
     var plain = !/<[a-z][\s\S]*>/i.test(html);
     var doc = new DOMParser().parseFromString('<body>' + (plain ? html.split(/\n\s*\n/).map(function (p) { return '<p>' + p.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>'; }).join('') : html) + '</body>', 'text/html');
-    var w = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null), nodes = [], n;
-    while ((n = w.nextNode())) { var par = n.parentNode && n.parentNode.nodeName; if (n.nodeValue.trim() && !/^(SCRIPT|STYLE|CODE|PRE)$/.test(par)) nodes.push(n); }
+    var jobs = [], seen = new Set();
+    [].forEach.call(doc.body.querySelectorAll('p,li,h1,h2,h3,h4,h5,h6,blockquote,figcaption,td,th'), function (el) {
+      if (!BLOCK.test(el.nodeName) || !hasInline(el) || !inlineOnly(el) || el.querySelector('img,br')) return;
+      jobs.push({ block: el }); el.querySelectorAll('*').forEach(function (c) { seen.add(c); }); seen.add(el);
+    });
+    var w = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null), n;
+    while ((n = w.nextNode())) {
+      var par = n.parentNode && n.parentNode.nodeName; if (!n.nodeValue.trim() || /^(SCRIPT|STYLE|CODE|PRE)$/.test(par)) continue;
+      var inBlock = jobs.some(function (j) { return j.block && j.block.contains(n); });
+      if (!inBlock) jobs.push({ node: n });
+    }
     var done = 0;
-    return nodes.reduce(function (p, node) { return p.then(function () { return mmText(node.nodeValue, from, to).then(function (t) { node.nodeValue = t; done++; if (progress) progress(done, nodes.length); }); }); }, Promise.resolve())
+    function tick() { done++; if (progress) progress(done, jobs.length); }
+    return jobs.reduce(function (p, job) {
+      return p.then(function () {
+        if (job.node) return mmText(job.node.nodeValue, from, to).then(function (t) { job.node.nodeValue = t; tick(); });
+        var m = markBlock(job.block);
+        return mmText(m.text, from, to).then(function (t) {
+          var h = unmark(t, m);
+          if (h != null) { job.block.innerHTML = h; return tick(); }
+          var ns = [], tw = doc.createTreeWalker(job.block, NodeFilter.SHOW_TEXT, null), x;     /* markers got lost: the old way, piece by piece */
+          while ((x = tw.nextNode())) if (x.nodeValue.trim()) ns.push(x);
+          return ns.reduce(function (q, nd) { return q.then(function () { return mmText(nd.nodeValue, from, to).then(function (t2) { nd.nodeValue = t2; }); }); }, Promise.resolve()).then(tick);
+        });
+      });
+    }, Promise.resolve())
       .then(function () { return plain ? [].map.call(doc.body.children, function (e) { return e.textContent; }).join('\n\n') : doc.body.innerHTML; });
   }
   var SPARK = 'M12 0C13 7 17 11 24 12C17 13 13 17 12 24C11 17 7 13 0 12C7 11 11 7 12 0Z';
@@ -1865,6 +1932,13 @@
     var trBox = h('div'), trData = {};
     Object.keys(a.translations || {}).forEach(function (l) { if (a.translations[l]) addTr(l, a.translations[l]); });
     f.srcLang = h('select', { 'aria-label': 'Language of this article' }); Object.keys(LANGS).forEach(function (l) { f.srcLang.appendChild(h('option', { value: l, text: LANGS[l] + ' (' + l + ')' })); }); f.srcLang.value = 'en';
+    var keepIn = h('input', { type: 'text', placeholder: 'Names to keep as they are, separated by commas (people, places, brands)', 'aria-label': 'Names to keep untranslated' });
+    var allBtn = h('button', { class: 'btn', type: 'button', text: 'Translate into every UN language', onclick: function () {
+      var src = f.srcLang.value || 'en'; allBtn.disabled = true;
+      ['ar', 'zh', 'fr', 'ru', 'es', 'de'].filter(function (l) { return l !== src; }).reduce(function (p, l) {
+        return p.then(function () { if (!trData[l]) addTr(l, {}); return trData[l].run(true); });
+      }, Promise.resolve()).then(function () { allBtn.disabled = false; toast('All languages translated. Please have someone read them before you publish.'); });
+    } });
     var trSel = h('select', {}, h('option', { value: '', text: '+ Add a translation…' }));
     Object.keys(LANGS).forEach(function (l) { trSel.appendChild(h('option', { value: l, text: LANGS[l] + ' (' + l + ')' })); });
     trSel.onchange = function () { if (trSel.value) { addTr(trSel.value, {}); mark(); } trSel.value = ''; };
@@ -1877,16 +1951,21 @@
       trData[l] = { t: t, s: s, c: c }; trBox.appendChild(box);
       var go = h('button', { class: 'btn', type: 'button', text: 'Translate for me' }), st = h('small', { class: 'hint', text: '' });
       go.onclick = function () {
+        return doTr();
+      };
+      function doTr(quiet) {
         var src = { t: f.title.value.trim(), s: f.subtitle.value.trim(), c: (f.rawHtml ? f.rawHtml.value : (quill && quill.getLength() > 1 ? quill.root.innerHTML : '')).trim() };
-        if (!src.t && !src.c) return toast('Write the headline or the article first.', true);
-        if ((t.value || s.value || c.value) && !confirm('Replace the text in this ' + (LANGS[l] || l) + ' translation?')) return;
+        if (!src.t && !src.c) { toast('Write the headline or the article first.', true); return Promise.resolve(); }
+        if (!quiet && (t.value || s.value || c.value) && !confirm('Replace the text in this ' + (LANGS[l] || l) + ' translation?')) return Promise.resolve();
         go.disabled = true; st.className = 'hint'; st.textContent = 'Translating\u2026';
         var from = f.srcLang.value || 'en';
-        mmText(src.t, from, l).then(function (x) { t.value = x; return mmText(src.s, from, l); }).then(function (x) { s.value = x; return mmHtml(src.c, from, l, function (d, n) { st.textContent = 'Translating\u2026 ' + d + ' of ' + n + ' paragraphs'; }); })
+        protectTerms = String(keepIn.value || '').split(/[,\n]/).map(function (x) { return x.trim(); }).filter(Boolean).concat([cfg.site && cfg.site.site_name, f.author && f.author.value].filter(function (x) { return x && x.length > 2; }));
+        return mmText(src.t, from, l).then(function (x) { t.value = x; return mmText(src.s, from, l); }).then(function (x) { s.value = x; return mmHtml(src.c, from, l, function (d, n) { st.textContent = 'Translating\u2026 ' + d + ' of ' + n + ' paragraphs'; }); })
           .then(function (x) { c.value = x; aiT.input.checked = true; mark(); st.className = 'hint ok'; st.textContent = 'Done. This is an automatic translation: please read it through. "Translations were made automatically" has been ticked.'; })
           .catch(function (e) { st.className = 'hint err'; st.textContent = e.message || String(e); })
           .then(function () { go.disabled = false; });
-      };
+      }
+      trData[l].run = doTr;
       box.querySelector('header').insertBefore(go, box.querySelector('header .btn.danger'));
       box.appendChild(st);
     }
@@ -1914,7 +1993,7 @@
             field('Extra images layout', f.layout), field('Video', f.video), field('Sources & credits', f.citations),
             h('div', { class: 'row2' }, field('Series ID', f.seriesId), field('Series order', f.seriesOrder)), live.box, liveBox)),
           seoPanel,
-          h('div', { class: 'panel' }, h('h3', { text: 'Translations' }), h('p', { class: 'hint', text: 'Add a language, then press "Translate for me": it translates the headline, the summary and the whole article with a free service (no account needed, about 5,000 characters a day). It is good enough to read but not perfect, so have someone check it before you publish.' }), field('This article is written in', f.srcLang), aiT.box, trBox, trSel),
+          h('div', { class: 'panel' }, h('h3', { text: 'Translations' }), h('p', { class: 'hint', text: 'Add a language, then press "Translate for me": it translates the headline, the summary and the whole article with free services (no account needed; if the first is unavailable it uses a second one with a small daily limit). Names you list below stay as they are. It is good enough to read but not perfect, so have someone check it before you publish.' }), field('This article is written in', f.srcLang), field('Keep these names untranslated', keepIn, 'The author and the site name are always kept.'), aiT.box, trBox, trSel, h('div', { class: 'btnrow' }, allBtn)),
           delBtn ? h('div', { class: 'panel' }, delBtn) : null)));
     /* the datalist must live in the document for the Section field */
     sync(); showCover(); buildBody();
