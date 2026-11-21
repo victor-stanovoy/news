@@ -1328,7 +1328,8 @@
   /* partners: white-label copies of the whole site, plus the label that sends stories and broadcasts to them */
   function partnersPanel(V) {
     V.partners = V.partners || [];
-    var list = h('div', { class: 'partners' });
+    var list = h('div', { class: 'partners' }), PP = {};
+    sb.rpc('partner_password_status').then(function (r) { (r.data || []).forEach(function (x) { PP[x] = true; }); draw(); }, function () {});
     var base = (V.base_url || '').replace(/\/+$/, '');
     function draw() {
       list.replaceChildren.apply(list, V.partners.map(function (p, i) {
@@ -1350,7 +1351,22 @@
         preview();
         var pr = h('select', { 'aria-label': 'Who can open this copy' }, h('option', { value: '', text: 'Anyone with the link (hidden from Google)' }), h('option', { value: 'password', text: 'Password protected (encrypted)' }));
         pr.value = p.protect === 'password' ? 'password' : ''; pr.addEventListener('change', function () { p.protect = pr.value; draw(); });
-        var prHint = p.protect === 'password' ? h('p', { class: 'hint', html: 'The password is <b>not</b> saved here, because anyone could read it. Add it once in GitHub: repository <b>Settings \u2192 Secrets and variables \u2192 Actions \u2192 New repository secret</b>, name <code>SPARK_PARTNER_PASSWORDS</code>, value <code>{"' + (p.slug || 'label') + '":"a long password"}</code> (10+ characters; several schools: <code>{"a":"...","b":"..."}</code>). Until it is there, this copy is not published at all. Stories labelled for this school are hidden from the public site.' }) : null;
+        var pwIn = h('input', { type: 'password', autocomplete: 'new-password', maxlength: '100', placeholder: PP[p.slug] ? 'A password is set. Type a new one to change it.' : 'Choose a long password (10+ characters)', 'aria-label': 'Password for ' + (p.name || p.slug) });
+        var pwMsg = h('p', { class: 'hint ' + (PP[p.slug] ? 'ok' : ''), text: PP[p.slug] ? 'A password is set (it cannot be shown again).' : 'No password yet: this copy is not published until you set one.' });
+        function pwDo(v) {
+          if (!p.slug) { pwMsg.className = 'hint err'; pwMsg.textContent = 'Give this partner a label first.'; return; }
+          if (v && v.length < 10) { pwMsg.className = 'hint err'; pwMsg.textContent = 'Use at least 10 characters.'; return; }
+          sb.rpc('partner_password_set', { p_slug: p.slug, p_password: v }).then(function (r) {
+            if (r.error) { pwMsg.className = 'hint err'; pwMsg.textContent = /does not exist|schema cache|function/i.test(r.error.message || '') ? 'Not set up yet: run supabase/settings.sql in the Supabase SQL Editor, then reload.' : errText(r.error); return; }
+            PP[p.slug] = !!v; pwIn.value = ''; pwIn.placeholder = v ? 'A password is set. Type a new one to change it.' : 'Choose a long password (10+ characters)';
+            pwMsg.className = 'hint ok'; pwMsg.textContent = v ? 'Password saved. Press "Update website" for it to take effect.' : 'Password removed.';
+          });
+        }
+        var prHint = p.protect === 'password' ? h('div', {},
+          field('Password for this copy', pwIn, 'Saved where only the website build can read it, never shown again. Anyone you give it to can open the copy.'),
+          h('div', { class: 'btnrow' }, h('button', { class: 'btn', type: 'button', text: 'Save password', onclick: function () { pwDo(pwIn.value); } }), PP[p.slug] ? h('button', { class: 'btn danger', type: 'button', text: 'Remove password', onclick: function () { pwDo(''); } }) : null),
+          pwMsg,
+          h('p', { class: 'hint', html: 'One-time setup so the website build can read it: in GitHub add the Actions secret <code>SUPABASE_SERVICE_KEY</code> (Supabase \u2192 Project Settings \u2192 API Keys \u2192 <b>service_role</b> key). Until it is there, this copy is not published and its stories stay hidden on the public site.' })) : null;
         var ac = h('input', { type: 'text', maxlength: '7', value: p.accent || '', placeholder: '#1a73e8', 'aria-label': 'Accent colour', oninput: function () { p.accent = ac.value.trim(); } });
         return h('div', { class: 'partner', 'data-i': String(i) },
           h('div', { class: 'row2' }, field('Website name in the embed', nm), field('Label (letters, numbers, dashes)', sl)),
@@ -1375,7 +1391,7 @@
         return box.replaceChildren(h('div', { class: 'msg err', text: /relation|does not exist|schema cache|permission/i.test(res[0].error.message || '') ? 'Settings are not set up yet. Run supabase/settings.sql in the Supabase SQL Editor (see the README), then reload.' : errText(res[0].error) }));
       }
       var V = deepMerge(cfg.site || {}, (res[0].data && res[0].data.data) || {});
-      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {}; V.newsletter = V.newsletter || {}; V.seo = V.seo || {}; V.partners = V.partners || []; V.privacy = V.privacy || {}; V.polls = V.polls || {}; V.editorial = V.editorial || {}; V.announcements = V.announcements || []; V.maintenance = V.maintenance || {};
+      V.ticker = V.ticker || {}; V.ticker.tab = V.ticker.tab || {}; V.live = V.live || {}; V.newsletter = V.newsletter || {}; V.seo = V.seo || {}; V.partners = V.partners || []; V.privacy = V.privacy || {}; V.polls = V.polls || {}; V.editorial = V.editorial || {}; V.announcements = V.announcements || []; V.maintenance = V.maintenance || {}; V.security = V.security || {};
       var st = {}; (res[1].data || []).forEach(function (x) { st[x.key] = x; });
       var mark = function () { dirty = true; dirtyEl.textContent = 'Unsaved changes'; };
       var dirtyEl = h('span', { class: 'dirty' });
@@ -1421,6 +1437,25 @@
         return crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']).then(function (k) {
           return crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: salt, iterations: iter }, k, 256);
         }).then(function (b) { return [].map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join(''); });
+      }
+      function lookPanel() {
+        var ul = h('select', { onchange: function () { V.ui_language = ul.value; mark(); } }, [['auto', 'Automatic: the visitor\u2019s browser language'], ['en', 'English'], ['ar', '\u0627\u0644\u0639\u0631\u0628\u064a\u0629 (Arabic, right to left)'], ['zh', '\u4e2d\u6587 (Chinese)'], ['fr', 'Fran\u00e7ais (French)'], ['ru', '\u0420\u0443\u0441\u0441\u043a\u0438\u0439 (Russian)'], ['es', 'Espa\u00f1ol (Spanish)'], ['de', 'Deutsch (German)'], ['off', 'Off: no interface translation']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
+        ul.value = V.ui_language || 'auto';
+        var th = h('select', { onchange: function () { V.theme = th.value; mark(); } }, [['auto', 'Match the visitor\u2019s device'], ['light', 'Light'], ['dark', 'Dark'], ['sepia', 'Sepia (warm paper)'], ['midnight', 'Midnight (pure black)'], ['contrast', 'High contrast'], ['forest', 'Forest']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
+        th.value = V.theme || 'auto';
+        return h('section', { class: 'panel' }, h('h3', { text: 'Language and look' }),
+          field('Language of buttons and labels', ul, 'The six UN languages plus German. Visitors can change it in the footer and on the Settings page. Articles are not affected: use the translation box in each article for those.'),
+          field('Look for new visitors', th, 'Visitors can still pick their own on the Settings page.'));
+      }
+      function securityPanel() {
+        var G = V.security = V.security || {}; if (!G.geo_mode) G.geo_mode = 'off'; if (!G.geo_countries) G.geo_countries = [];
+        var mode = h('select', { onchange: function () { G.geo_mode = mode.value; mark(); } }, [['off', 'Open to every country'], ['only', 'Only these countries'], ['except', 'Every country except these']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
+        mode.value = G.geo_mode;
+        var list = h('input', { type: 'text', placeholder: 'Two-letter codes, e.g. AT, DE, CH', oninput: function () { G.geo_countries = list.value.split(/[\s,;]+/).map(function (x) { return x.toUpperCase(); }).filter(function (x) { return /^[A-Z]{2}$/.test(x); }); mark(); } });
+        list.value = (G.geo_countries || []).join(', ');
+        return h('section', { class: 'panel' }, h('h3', { text: 'Security: country' }),
+          field('Who may open the website', mode), field('Countries', list, 'ISO codes: AT Austria, DE Germany, CH Switzerland, US United States, GB United Kingdom \u2026'),
+          h('p', { class: 'hint', text: 'Honest limits: this website is a set of public files, so the check runs in the visitor\u2019s browser using a free country lookup (api.country.is, which sees the visitor\u2019s IP address). It keeps out ordinary visitors but a VPN or someone who reads the files gets round it, and search engines and link previews are always let through. If the lookup fails, the visitor is let in. For a hard lock put the site behind Cloudflare (free) and use its country rules. School copies can be locked with a password instead (see Partners).' }));
       }
       function maintPanel() {
         var M = V.maintenance; if (M.title === undefined) M.title = ''; 
@@ -1540,6 +1575,7 @@
             field('Minimum words to publish', bind(V.editorial, 'min_words', 'number', { min: 0, max: 5000, step: 10 }), '0 = no minimum. Writers see a live word count; articles below the minimum can be saved as drafts but not published.'),
             tick(V.editorial, 'admin_override', 'Admins may publish a shorter article anyway (they get a confirmation)'),
             tick(V.editorial, 'show_wordcount', 'Show the word count next to "min read" on published articles')),
+          lookPanel(), securityPanel(),
           annPanel(), maintPanel(),
           h('section', { class: 'panel' }, h('h3', { text: 'Tickers' }),
             tick(V.ticker, 'enabled', 'Show the headline bar under the menu'),

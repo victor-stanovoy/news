@@ -40,7 +40,7 @@ window.addEventListener('error', function (e) { window.__sparkErrors.push(e.mess
     tb.addEventListener('click', function () {
       var root = document.documentElement;
       var now = root.dataset.theme || (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-      var next = now === 'dark' ? 'light' : 'dark';
+      var next = /^(dark|midnight|forest|contrast)$/.test(now) ? 'light' : 'dark';
       root.dataset.theme = next;
       try { localStorage.setItem('spark-theme', next); } catch (e) {}
     });
@@ -165,6 +165,8 @@ window.addEventListener('error', function (e) { window.__sparkErrors.push(e.mess
   if (form) {
     var pr = getPrefs(), siteOn = !!(site && site.enabled && items.length);
     var q = function (n) { return form.elements[n]; };
+    var uiSel = document.getElementById('ui-lang-pref');
+    if (uiSel) uiSel.addEventListener('change', function () { if (window.SparkI18n) window.SparkI18n.set(uiSel.value); });
     var themeNow = 'auto';
     try { themeNow = localStorage.getItem('spark-theme') || 'auto'; } catch (e) {}
     q('tab').checked = siteOn && pr.tab !== false;

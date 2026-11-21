@@ -30,7 +30,7 @@ begin
   if jsonb_typeof(p_data) is distinct from 'object' then raise exception 'Settings must be an object'; end if;
   select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into clean from jsonb_each(p_data) as t(k, v)
    where k = any (array['site_name','logo_left','logo_right','tagline','language','base_url','footer_text','nav_max','nav_order',
-                        'home_category_sections','most_read_count','breaking_max_age_days','ticker','live','newsletter','seo','privacy','polls','partners','editorial','announcements','maintenance']);
+                        'home_category_sections','most_read_count','breaking_max_age_days','ticker','live','newsletter','seo','privacy','polls','partners','editorial','announcements','maintenance','ui_language','theme','security']);
   update public.site_settings set data = clean, updated_at = now(), updated_by = auth.uid() where id = 1;
   -- rebuild the website if instant updates are set up (ignored otherwise)
   begin
@@ -69,3 +69,33 @@ grant execute on function public.settings_save(jsonb), public.secret_status(), p
 
 -- the newsletter no longer uses Brevo: remove a key saved by an earlier version
 delete from public.app_secrets where key = 'brevo_api_key';
+
+-- passwords for protected school copies. Write-only: the editor can set or clear one, nobody can read it back.
+-- Only the website build (with the service key) reads them, to encrypt the school's copy.
+create table if not exists public.partner_secrets (slug text primary key, password text not null, updated_at timestamptz not null default now());
+alter table public.partner_secrets enable row level security;
+revoke all on public.partner_secrets from anon, authenticated;
+grant select on public.partner_secrets to service_role;
+
+create or replace function public.partner_password_set(p_slug text, p_password text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if public.editor_role() is distinct from 'admin' then raise exception 'Only admins can set passwords'; end if;
+  if p_slug !~ '^[a-z0-9-]{1,40}$' then raise exception 'Bad label'; end if;
+  if nullif(p_password, '') is null then delete from public.partner_secrets where slug = p_slug;
+  else
+    if length(p_password) < 10 then raise exception 'Use at least 10 characters'; end if;
+    insert into public.partner_secrets (slug, password) values (p_slug, p_password)
+      on conflict (slug) do update set password = excluded.password, updated_at = now();
+  end if;
+end $$;
+
+create or replace function public.partner_password_status()
+returns text[] language plpgsql security definer stable set search_path = public as $$
+begin
+  if public.editor_role() is distinct from 'admin' then raise exception 'Only admins can see this'; end if;
+  return coalesce((select array_agg(slug) from public.partner_secrets), '{}');
+end $$;
+
+revoke execute on function public.partner_password_set(text, text), public.partner_password_status() from public, anon;
+grant execute on function public.partner_password_set(text, text), public.partner_password_status() to authenticated;

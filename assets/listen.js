@@ -59,8 +59,13 @@
   /* interface */
   var wrap = el('div', { 'class': 'listen', role: 'group', 'aria-label': L[0] });
   var main = el('button', { type: 'button', 'class': 'listen-btn' }, [
-    (function () { var s = el('span', { 'class': 'listen-ico', 'aria-hidden': 'true' }); s.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 10v4h4l5 4V6L7 10H3z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'; return s; })(),
+    el('span', { 'class': 'listen-ico', 'aria-hidden': 'true' }),
     el('span', { 'class': 'listen-lab', text: L[0] }), el('small', { text: ' · ' + mins + ' ' + L[8] })]);
+  var ICON = { idle: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 10v4h4l5 4V6L7 10H3z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    playing: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>',
+    paused: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg>' };
+  main.title = L[0] + ' · ' + mins + ' ' + L[8]; main.setAttribute('aria-label', main.title);
+  var gear = el('button', { type: 'button', 'class': 'lbtn lgear', 'aria-label': L[6] + ' / ' + L[7], 'aria-expanded': 'false', text: '⋯' });
   var panel = el('div', { 'class': 'listen-panel', hidden: '' });
   var prev = el('button', { type: 'button', 'class': 'lbtn', 'aria-label': L[4], text: '⏮' });
   var next = el('button', { type: 'button', 'class': 'lbtn', 'aria-label': L[5], text: '⏭' });
@@ -71,11 +76,15 @@
   [0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75].forEach(function (x) { var o = el('option', { value: x, text: x + '×' }); spd.appendChild(o); });
   spd.value = store('speed') || '1'; if (spd.value !== (store('speed') || '1')) spd.value = '1';
   var note = el('p', { 'class': 'listen-note', role: 'status', 'aria-live': 'polite' });
-  panel.appendChild(el('div', { 'class': 'listen-row' }, [prev, stop, next, bar]));
-  panel.appendChild(el('div', { 'class': 'listen-row' }, [el('label', {}, [el('span', { text: L[6] }), sel]), el('label', {}, [el('span', { text: L[7] }), spd])]));
+  panel.appendChild(el('div', { 'class': 'listen-row lmain' }, [prev, next, bar, gear, stop]));
+  var setrow = el('div', { 'class': 'listen-row lset', hidden: '' }, [el('label', {}, [el('span', { text: L[6] }), sel]), el('label', {}, [el('span', { text: L[7] }), spd])]);
+  panel.appendChild(setrow);
+  gear.addEventListener('click', function () { var o = setrow.hidden; setrow.hidden = !o; gear.setAttribute('aria-expanded', o ? 'true' : 'false'); });
   panel.appendChild(note);
   wrap.appendChild(main); wrap.appendChild(panel);
-  (art.querySelector('header.ah') || h1).insertAdjacentElement('afterend', wrap);
+  document.body.appendChild(wrap);
+  /* a small dock that follows the reader down the article and steps aside when the article is out of view */
+  if ('IntersectionObserver' in window) new IntersectionObserver(function (l) { wrap.classList.toggle('away', !l[0].isIntersecting && state === 'idle'); }, { threshold: 0 }).observe(art);
 
   function fillSel() {
     sel.textContent = '';
@@ -92,7 +101,9 @@
   function progress() { var done = 0, tot = 0; blocks.forEach(function (b, i) { tot += b.text.length; if (i < bi) done += b.text.length; }); bar.firstChild.style.width = (tot ? Math.round(done / tot * 100) : 0) + '%'; }
   function ui() {
     var playing = state === 'playing';
-    main.querySelector('.listen-lab').textContent = state === 'idle' ? L[0] : playing ? L[1] : L[2];
+    var lab = state === 'idle' ? L[0] : playing ? L[1] : L[2];
+    main.querySelector('.listen-lab').textContent = lab; main.querySelector('.listen-ico').innerHTML = ICON[state] || ICON.idle;
+    main.title = lab; main.setAttribute('aria-label', lab); wrap.classList.toggle('open', state !== 'idle');
     main.classList.toggle('on', state !== 'idle'); panel.hidden = state === 'idle';
     main.setAttribute('aria-pressed', playing ? 'true' : 'false');
   }

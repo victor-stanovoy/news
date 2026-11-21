@@ -374,3 +374,11 @@ Limits to know: the unlock is one shared password per school (not personal accou
 ## Automatic translation
 
 In the article editor, open **Translations**, tell it which language the article is written in, add a language and press **Translate for me**. It translates the headline, the summary and the whole article, keeping paragraphs, links and pictures as they are, and ticks "Translations were made automatically". It uses the free MyMemory service: no account or key, but about 5,000 characters a day per internet connection (a long article in several languages may need a second day). The result is good enough to read but not perfect, so have someone check it before you publish.
+
+## Language, looks, country and school passwords
+
+- **Interface language** (editor → Settings → Language and look): buttons and labels in the six UN languages (Arabic with right-to-left, Chinese, English, French, Russian, Spanish) plus German. Automatic follows the visitor's browser; visitors can switch in the footer or on the Settings page. Articles keep their own language; use the translation box in each article.
+- **Looks**: light, dark, sepia, midnight, high contrast, forest. You choose the first look for new visitors; visitors can pick their own.
+- **Country** (Settings → Security: country): only these / all except these. It runs in the browser, so it is a soft lock (a VPN gets round it; crawlers and link previews are let through; a failed lookup lets people in). For a hard lock use Cloudflare country rules.
+- **School passwords**: set them in Settings → Partners → Password protected. They are stored write-only (nobody can read them back). Run `supabase/settings.sql` once, and add the GitHub Actions secret `SUPABASE_SERVICE_KEY` (Supabase → Project Settings → API Keys → service_role) so the build can read them. The older `SPARK_PARTNER_PASSWORDS` secret still works.
+- **Read aloud**: a small speaker button at the bottom left of every article. It expands into a slim control bar (play, skip, progress, voice and speed under "⋯") and steps aside when the article is off screen.

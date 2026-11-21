@@ -44,6 +44,8 @@ LANG_NAMES = {"en": "English", "de": "Deutsch", "fr": "Français", "es": "Españ
               "ar": "العربية", "tr": "Türkçe", "pl": "Polski", "nl": "Nederlands", "uk": "Українська",
               "hi": "हिन्दी", "he": "עברית", "fa": "فارسی", "ur": "اردو"}
 RTL_LANGS = {"ar", "he", "fa", "ur"}
+UI_LANGS = ("en", "ar", "zh", "fr", "ru", "es", "de")
+THEMES = ("auto", "light", "dark", "sepia", "midnight", "contrast", "forest")
 SPARK_PATH = "M12 0C13 7 17 11 24 12C17 13 13 17 12 24C11 17 7 13 0 12C7 11 11 7 12 0Z"
 
 DEFAULT_CONFIG = {
@@ -90,6 +92,9 @@ DEFAULT_CONFIG = {
     "editorial": {"min_words": 0, "show_wordcount": False, "admin_override": True},   # minimum article length (enforced in the editor) and word count on articles
     "announcements": [],            # notices for visitors: bar or pop-up, with start and end (editor, Settings)
     "maintenance": {"enabled": False, "title": "", "message": "", "eta": "", "salt": "", "hash": "", "iter": 150000},   # "be right back" page with a password bypass
+    "ui_language": "auto",          # language of the buttons and labels: auto = the visitor's browser language, or ar, zh, en, fr, ru, es, de; "off" = no translation
+    "theme": "auto",                # first look for new visitors: auto (their device), light, dark, sepia, midnight, contrast, forest
+    "security": {"geo_mode": "off", "geo_countries": []},   # who may open the site by country: off | only (these) | except (these). A soft lock, see README
     "polls": {"enabled": True},     # visitor polls: card or full-screen banner (set up in the editor first, needs supabase/polls.sql)
     "live": {"enabled": True, "banner": False},      # "Live" page for live radio and TV (needs the database and supabase/live.sql); banner = "We are live" bar on every page while something is on air
     "supabase": {"url": "", "anon_key": ""},   # the editor and database; both values are safe to publish
@@ -567,6 +572,17 @@ def clean_settings(d):
         try: o["iter"] = max(10000, min(1000000, int(s.get("iter") or 150000)))
         except (TypeError, ValueError): pass
         out["maintenance"] = o
+    if isinstance(d.get("ui_language"), str):
+        v = d["ui_language"].strip().lower()
+        out["ui_language"] = v if v in UI_LANGS or v in ("auto", "off") else "auto"
+    if isinstance(d.get("theme"), str):
+        out["theme"] = d["theme"].strip().lower() if d["theme"].strip().lower() in THEMES else "auto"
+    if isinstance(d.get("security"), dict):
+        s = d["security"]; o = {}
+        o["geo_mode"] = s.get("geo_mode") if s.get("geo_mode") in ("off", "only", "except") else "off"
+        cs = s.get("geo_countries"); cs = re.split(r"[\s,;]+", cs) if isinstance(cs, str) else (cs if isinstance(cs, list) else [])
+        o["geo_countries"] = sorted({c.strip().upper() for c in cs if isinstance(c, str) and re.fullmatch(r"[A-Za-z]{2}", c.strip())})[:260]
+        out["security"] = o
     if isinstance(d.get("announcements"), list):
         al = []
         for x in d["announcements"][:30]:
@@ -1002,12 +1018,28 @@ class Site:
         loc = seo.get("locale") or {"en": "en_GB", "de": "de_AT"}.get(cfg["language"][:2], "")
         if loc:
             og += f'<meta property="og:locale" content="{esc(loc.replace("-", "_"))}">'
+        dtheme = json.dumps(cfg.get("theme") if cfg.get("theme") not in (None, "auto") else "")
         return (f'<!doctype html><html lang="{esc(cfg["language"])}"><head><meta charset="utf-8">'
                 f'<meta name="viewport" content="width=device-width,initial-scale=1">{self.seo_tags(ld)}'
                 f'<meta name="color-scheme" content="light dark">'
-                f'<script>try{{var th=localStorage.getItem("spark-theme");if(th)document.documentElement.dataset.theme=th}}catch(e){{}}</script>'
+                f'<script>try{{var th=localStorage.getItem("spark-theme")||{dtheme};if(th)document.documentElement.dataset.theme=th}}catch(e){{}}</script>{self.geo_gate()}'
                 f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}{icon}'
                 f'<link rel="stylesheet" href="{root}assets/style.css?v={asset_ver("style.css")}">{self.accent_css()}</head>')
+
+    def geo_gate(self):
+        """Country restriction. It runs in the visitor's browser (a static site has no server to refuse anyone), so it keeps out ordinary visitors
+        but not someone determined: a VPN gets round it. It fails open, so a failed lookup never locks everybody out."""
+        g = self.cfg.get("security") or {}
+        if g.get("geo_mode") not in ("only", "except") or not g.get("geo_countries"):
+            return ""
+        conf = json.dumps({"m": g["geo_mode"], "c": g["geo_countries"], "n": self.cfg["site_name"]}, ensure_ascii=False).replace("</", "<\\/")
+        return ('<style>html.geo-wait body{visibility:hidden}</style><script>(function(){var C=' + conf + ';var d=document.documentElement;'
+                'try{if(sessionStorage.getItem("spark-geo")==="ok")return}catch(e){}'
+                'if(/bot|crawl|spider|slurp|bing|google|facebookexternalhit|twitterbot|linkedin|whatsapp|telegram|discord|preview/i.test(navigator.userAgent))return;'
+                'd.classList.add("geo-wait");var done=false;function ok(){if(done)return;done=true;d.classList.remove("geo-wait");try{sessionStorage.setItem("spark-geo","ok")}catch(e){}}'
+                'function no(cc){if(done)return;done=true;d.classList.remove("geo-wait");var s=document.createElement("style");s.textContent="body>*{display:none!important}body{background:#0b0833;color:#fff;font:18px/1.5 system-ui,sans-serif}.geo{display:block!important;max-width:30em;margin:18vh auto;padding:0 24px}.geo h1{font-size:28px;margin:0 0 12px}";'
+                'document.head.appendChild(s);var b=document.createElement("div");b.className="geo";var h=document.createElement("h1");h.textContent=C.n;var p=document.createElement("p");p.textContent="Sorry, this website is not available in your country ("+cc+").";b.appendChild(h);b.appendChild(p);document.body.appendChild(b)}'
+                'var t=setTimeout(ok,4000);fetch("https://api.country.is/",{cache:"no-store"}).then(function(r){return r.json()}).then(function(j){clearTimeout(t);var cc=String(j&&j.country||"").toUpperCase();if(!cc)return ok();var inl=C.c.indexOf(cc)>=0;(C.m==="only"?inl:!inl)?ok():no(cc)}).catch(function(){clearTimeout(t);ok()});})();</script>')
 
     def nl_on(self):
         return not self.locked() and bool(self.cfg["newsletter"].get("enabled")) and bool(db_settings(self.cfg)[0])
@@ -1046,7 +1078,8 @@ class Site:
                 '<p><button type="button" id="prefs-preview">Preview in this tab</button></p>'
                 '<p id="prefs-safari" class="small" hidden>Safari shows only about 20 characters of a tab title, and hides titles when there is just one tab open, so the ticker is shortened there.</p>'
                 '</fieldset>'
-                '<fieldset><legend>Appearance</legend>' + radios("theme", [("auto", "Match my device"), ("light", "Light"), ("dark", "Dark")]) + '</fieldset>'
+                '<fieldset><legend>Appearance</legend>' + radios("theme", [("auto", "Match my device"), ("light", "Light"), ("dark", "Dark"), ("sepia", "Sepia"), ("midnight", "Midnight"), ("contrast", "High contrast"), ("forest", "Forest")]) + '</fieldset>'
+                '<fieldset><legend>Language</legend><p class="small">Buttons and labels. Articles stay in the language they were written in unless a translation is offered.</p><select id="ui-lang-pref" name="uilang" aria-label="Language"><option value="auto">Automatic (my browser)</option><option value="en">English</option><option value="ar">العربية</option><option value="zh">中文</option><option value="fr">Français</option><option value="ru">Русский</option><option value="es">Español</option><option value="de">Deutsch</option></select></fieldset>'
                 '<p id="prefs-msg" class="small" role="status"></p></form></div>')
         return self.page("Settings", body, "../")
 
@@ -1335,11 +1368,14 @@ class Site:
             u, k = db_settings(self.cfg)
             data["polls"] = {"url": u, "key": k}
             polls_tag = f'<script src="{root}assets/polls.js?v={asset_ver("polls.js")}" defer></script>'
+        if self.cfg.get("ui_language") != "off":
+            data["i18n"] = {"def": self.cfg.get("ui_language", "auto"), "site": self.cfg["language"][:2]}
         blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
         cons = "" if self.locked() else f'<script src="{root}assets/consent.js?v={asset_ver("consent.js")}" defer></script>'
         return (f'<script id="spark-ticker-data" type="application/json">{blob}</script>'
                 f'<script src="{root}assets/site.js?v={asset_ver("site.js")}" defer></script>' + nl_tag + polls_tag + cons
-                + f'<script src="{root}assets/fx.js?v={asset_ver("fx.js")}" defer></script>')
+                + f'<script src="{root}assets/fx.js?v={asset_ver("fx.js")}" defer></script>'
+                + ("" if self.cfg.get("ui_language") == "off" else f'<script src="{root}assets/i18n.js?v={asset_ver("i18n.js")}" defer></script>'))
 
     def page(self, title, body, root, active="", **kw):
         if title == "" and not kw.get("ld"):
@@ -1803,13 +1839,26 @@ dec(pw).then(function(h){show(h,pw)},function(){bt.disabled=false;er.textContent
 })();</script></body></html>"""
 
 
-def partner_passwords():
+def partner_passwords(cfg=None):
     """Passwords for protected schools. They come from the build's environment (a GitHub secret), never from the public settings."""
     try:
         d = json.loads(os.environ.get("SPARK_PARTNER_PASSWORDS", "") or "{}")
     except ValueError:
         return {}
-    return {str(k): v for k, v in d.items() if isinstance(v, str)} if isinstance(d, dict) else {}
+    out = {str(k): v for k, v in d.items() if isinstance(v, str)} if isinstance(d, dict) else {}
+    # passwords set in the editor live in a table only the service key can read (GitHub secret SUPABASE_SERVICE_KEY)
+    skey = (os.environ.get("SUPABASE_SERVICE_KEY") or "").strip()
+    url = clean_db_url(os.environ.get("SUPABASE_URL") or (cfg or {}).get("supabase", {}).get("url"))
+    if skey and url:
+        try:
+            req = urllib.request.Request(url + "/rest/v1/partner_secrets?select=slug,password", headers={"apikey": skey, "Authorization": "Bearer " + skey})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                for row in json.loads(r.read().decode("utf-8")):
+                    if isinstance(row.get("slug"), str) and isinstance(row.get("password"), str):
+                        out[row["slug"]] = row["password"]       # the editor wins over the older GitHub secret
+        except Exception as e:
+            print("  note: could not read partner passwords from the database (%s)" % type(e).__name__)
+    return out
 
 
 def lock_folder(folder, password, name, slug):
@@ -1885,7 +1934,7 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
         (out / "editor").mkdir()
         url, key = db_settings(cfg)
         site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
-                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners")
+                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners", "ui_language", "theme", "security")
         conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys},
                            "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js"), "schedule": asset_ver("schedule-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
@@ -1966,7 +2015,7 @@ def main():
     keep, red = view_for(arts, partners, None, base)
     site = Site(cfg, keep, now)
     write_site(site, keep, red, OUT, True, cfg)
-    pws = partner_passwords()
+    pws = partner_passwords(cfg)
     for p in partners:                      # one full copy of the site per partner, under /p/<label>/
         locked_pw = ""
         if p.get("protect") == "password":
