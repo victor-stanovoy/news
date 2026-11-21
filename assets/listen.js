@@ -19,6 +19,10 @@
             zh: ['收听', '暂停', '继续', '停止', '上一段', '下一段', '声音', '语速', '分钟', '你的设备没有这种语言的语音。'] };
   var L = T[base] || T.en;
 
+  var HINT = { en: 'Tip: for a more natural voice open this page in Edge or Chrome, or on iPhone add an Enhanced voice under Settings → Accessibility → Spoken Content → Voices.',
+               de: 'Tipp: Für eine natürlichere Stimme diese Seite in Edge oder Chrome öffnen, oder am iPhone unter Einstellungen → Bedienungshilfen → Gesprochene Inhalte → Stimmen eine erweiterte Stimme laden.',
+               fr: 'Astuce : pour une voix plus naturelle, ouvrez la page dans Edge ou Chrome, ou sur iPhone ajoutez une voix améliorée dans Réglages → Accessibilité → Contenu énoncé → Voix.',
+               es: 'Consejo: para una voz más natural abre la página en Edge o Chrome, o en iPhone añade una voz mejorada en Ajustes → Accesibilidad → Contenido leído → Voces.' };
   if (!synth || typeof SpeechSynthesisUtterance === 'undefined') return;
 
   /* what to read: the headline, then the text blocks in order */
@@ -39,19 +43,22 @@
   var voices = [], chosen = null;
   function score(v) {
     var n = v.name, s = 0;
-    if (/natural|neural|online/i.test(n)) s += 60;
-    if (/premium|enhanced/i.test(n)) s += 45;
-    if (/^google/i.test(n)) s += 35;
-    if (/siri|samantha|daniel|karen|moira|ava|allison|serena|zoe|tessa|anna|petra|thomas|amelie|jacques|monica|paulina|milena|yuri|tarik|laila|ting-ting|mei-jia/i.test(n)) s += 22;
-    if (!v.localService) s += 6;
-    if (/espeak|compact|festival/i.test(n)) s -= 40;
-    if (v.lang.toLowerCase() === lang) s += 8;
+    if (/natural|neural|online|multilingual/i.test(n)) s += 70;          /* Edge / Windows natural voices, Apple multilingual */
+    if (/premium|enhanced|siri|studio|wavenet/i.test(n)) s += 55;
+    if (/^google/i.test(n)) s += 38;                                      /* Chrome network voices sound far better than the local ones */
+    if (/samantha|ava|allison|serena|zoe|tessa|daniel|karen|moira|anna|petra|markus|viktor|thomas|amelie|jacques|marie|monica|paulina|jorge|milena|yuri|tarik|laila|ting-ting|mei-jia|sin-ji|xiaoxiao|yunxi/i.test(n)) s += 20;
+    if (!v.localService) s += 10;
+    if (/albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|hysterical|jester|organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|kathy|ralph|princess|eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley/i.test(n) && !/premium|enhanced|siri/i.test(n)) s -= 60;
+    if (/espeak|compact|festival|mbrola/i.test(n)) s -= 50;
+    var vl = v.lang.toLowerCase().replace('_', '-');
+    if (vl === lang) s += 8; else if (vl.split('-')[0] === base && lang.indexOf('-') < 0 && /-(us|gb|de|at|fr|es|ru|cn)$/.test(vl)) s += 3;
+    if (v['default']) s += 2;
     return s;
   }
   function loadVoices() {
     var all = synth.getVoices() || [];
     voices = all.filter(function (v) { return v.lang.toLowerCase().split(/[-_]/)[0] === base; }).sort(function (a, b) { return score(b) - score(a); });
-    if (!voices.length) voices = [];
+    if (!voices.length) voices = [];     /* no voice for this language: say so instead of reading it with the wrong accent */
     var saved = store('voice'); chosen = voices.filter(function (v) { return v.name === saved; })[0] || voices[0] || null;
     if (sel) fillSel();
   }
@@ -75,9 +82,10 @@
   var spd = el('select', { 'aria-label': L[7] });
   [0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75].forEach(function (x) { var o = el('option', { value: x, text: x + '×' }); spd.appendChild(o); });
   spd.value = store('speed') || '1'; if (spd.value !== (store('speed') || '1')) spd.value = '1';
+  var tip = el('p', { 'class': 'listen-note listen-tip' });
   var note = el('p', { 'class': 'listen-note', role: 'status', 'aria-live': 'polite' });
   panel.appendChild(el('div', { 'class': 'listen-row lmain' }, [prev, next, bar, gear, stop]));
-  var setrow = el('div', { 'class': 'listen-row lset', hidden: '' }, [el('label', {}, [el('span', { text: L[6] }), sel]), el('label', {}, [el('span', { text: L[7] }), spd])]);
+  var setrow = el('div', { 'class': 'listen-row lset', hidden: '' }, [el('label', {}, [el('span', { text: L[6] }), sel]), el('label', {}, [el('span', { text: L[7] }), spd]), tip]);
   panel.appendChild(setrow);
   gear.addEventListener('click', function () { var o = setrow.hidden; setrow.hidden = !o; gear.setAttribute('aria-expanded', o ? 'true' : 'false'); });
   panel.appendChild(note);
@@ -90,7 +98,7 @@
     sel.textContent = '';
     voices.forEach(function (v) { var q = score(v) >= 40 ? '★ ' : ''; var o = el('option', { value: v.name, text: q + v.name.replace(/^(Microsoft|Google)\s+/, '$1 ') + ' (' + v.lang + ')' }); sel.appendChild(o); });
     if (chosen) sel.value = chosen.name;
-    note.textContent = voices.length ? '' : L[9];
+    note.textContent = !voices.length ? L[9] : ''; tip.textContent = voices.length && score(voices[0]) < 40 ? (HINT[base] || HINT.en) : '';
   }
   loadVoices(); synth.addEventListener && synth.addEventListener('voiceschanged', loadVoices); if ('onvoiceschanged' in synth) synth.onvoiceschanged = loadVoices;
   fillSel();

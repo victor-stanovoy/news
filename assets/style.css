@@ -674,3 +674,4 @@ button:active,.btn:active{transform:scale(.97)}
 .uilang select option{color:#111}
 #ui-lang-pref{font:inherit;padding:8px 10px;border:1px solid var(--ink);border-radius:0;background:var(--bg);color:var(--ink)}
 [dir=rtl] .listen,[dir=rtl] .tools{direction:rtl}
+.listen-tip{flex:1 1 100%;max-width:340px}
