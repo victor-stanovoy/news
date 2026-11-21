@@ -302,3 +302,6 @@ body.focusing{overflow:hidden}
 .gtiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:10px}
 .gtile{border:1px solid var(--line,#ddd);padding:8px}.gtile.sel{outline:2px solid #fe2c55}
 .gtile video{width:100%;aspect-ratio:16/9;background:#000;object-fit:cover;display:block}.gname2{font-weight:700;margin:6px 0}
+
+.airpill{position:fixed;left:12px;bottom:12px;z-index:90;max-width:min(520px,calc(100vw - 24px));padding:8px 12px;background:#110c4a;color:#fff;font-size:13px;border-left:4px solid #2fbf71}
+.airpill.warn{border-left-color:#fe2c55;background:#4a0c1a}

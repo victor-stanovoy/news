@@ -127,12 +127,51 @@
     return id;
   }
   function wClear(id) { if (id && wt.map[id]) { wt.map[id](); delete wt.map[id]; } }
-  var keep = { lock: null, wake: null };
-  function keepAwake(on) {            /* while on air: ask the browser not to freeze this tab or put the screen to sleep */
-    if (!on) { if (keep.lock) { keep.lock(); keep.lock = null; } if (keep.wake) { try { keep.wake.release(); } catch (e) { /* gone */ } keep.wake = null; } return; }
-    try { if (navigator.locks && !keep.lock) navigator.locks.request('spark-on-air', function () { return new Promise(function (res) { keep.lock = res; }); }); } catch (e) { /* not supported */ }
-    try { if (navigator.wakeLock && !keep.wake) navigator.wakeLock.request('screen').then(function (w) { keep.wake = w; w.addEventListener('release', function () { keep.wake = null; }); }, function () {}); } catch (e) { /* not supported */ }
+  /* Keeping the studio alive while on air. Three layers, and a visible status so you can see what is working:
+     1. the browser's screen wake lock (Chrome, Edge, Safari 16.4+, Firefox 126+): the screen does not sleep. It is let go whenever the tab is hidden, so we ask again when you come back;
+     2. a Web Lock, which tells Chrome not to freeze or discard the tab;
+     3. if there is no wake lock (or it is refused), a tiny silent video playing in the page, the trick other studio tools use. */
+  var keep = { lock: null, wake: null, vid: null, how: '', hiddenSince: 0, slow: false };
+  function nosleepVideo() {
+    if (keep.vid) return;
+    try {
+      var c = document.createElement('canvas'); c.width = c.height = 16; var g = c.getContext('2d'), n = 0;
+      keep.vtimer = wInterval(function () { n++; g.fillStyle = n % 2 ? '#000' : '#010101'; g.fillRect(0, 0, 16, 16); }, 1000);
+      var v = document.createElement('video'); v.muted = true; v.loop = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.setAttribute('aria-hidden', 'true');
+      v.style.cssText = 'position:fixed;width:2px;height:2px;opacity:.01;pointer-events:none;bottom:0;left:0'; v.srcObject = c.captureStream(2);
+      document.body.appendChild(v); v.play().catch(function () {}); keep.vid = v;
+    } catch (e) { /* not possible here */ }
   }
+  function keepAwake(on) {
+    if (!on) {
+      if (keep.lock) { keep.lock(); keep.lock = null; }
+      if (keep.wake) { try { keep.wake.release(); } catch (e) { /* gone */ } keep.wake = null; }
+      if (keep.vid) { try { keep.vid.pause(); keep.vid.remove(); } catch (e) { /* gone */ } keep.vid = null; wClear(keep.vtimer); }
+      keep.how = ''; paintPill(); return;
+    }
+    try { if (navigator.locks && !keep.lock) navigator.locks.request('spark-on-air', function () { return new Promise(function (res) { keep.lock = res; }); }); } catch (e) { /* not supported */ }
+    var done = function () { if (!keep.wake) nosleepVideo(); keep.how = keep.wake ? 'screen lock' : (keep.vid ? 'silent video' : ''); paintPill(); };
+    if (navigator.wakeLock && !keep.wake && !document.hidden) {
+      navigator.wakeLock.request('screen').then(function (w) { keep.wake = w; w.addEventListener('release', function () { keep.wake = null; keep.how = keep.vid ? 'silent video' : ''; paintPill(); }); done(); }, function () { done(); });
+    } else done();
+  }
+  var pill = null;
+  function paintPill() {
+    if (!anyAir()) { if (pill) { pill.remove(); pill = null; } return; }
+    if (!pill) { pill = document.createElement('div'); pill.className = 'airpill'; pill.setAttribute('role', 'status'); document.body.appendChild(pill); }
+    var warn = keep.slow ? 'Your browser is slowing this tab down: bring it to the front, or drag the tab into its own window.' : '';
+    pill.className = 'airpill' + (warn || !keep.how ? ' warn' : '');
+    pill.textContent = warn || ('On air. This computer is being kept awake' + (keep.how ? ' (' + keep.how + ').' : ': NOT possible in this browser, so change its power settings and keep this tab in front.'));
+  }
+  /* is the browser slowing this tab? ordinary timers arrive late when it does */
+  (function () {
+    var last = Date.now();
+    setInterval(function () {
+      var now = Date.now(), late = now - last - 1000; last = now;
+      var slow = anyAir() && document.hidden && late > 2500;
+      if (slow !== keep.slow) { keep.slow = slow; paintPill(); if (slow) toast('Your browser is slowing the studio tab. Bring it to the front.', true); }
+    }, 1000);
+  })();
   document.addEventListener('visibilitychange', function () { if (!document.hidden && anyAir()) keepAwake(true); });
   var SPARK = 'M12 0C13 7 17 11 24 12C17 13 13 17 12 24C11 17 7 13 0 12C7 11 11 7 12 0Z';
 
