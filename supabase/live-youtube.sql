@@ -13,7 +13,7 @@ drop view if exists public.live_now;
 create view public.live_now as
   select kind, title, started_at, now_playing, label, yt_id, yt_started_at, now() as server_now
   from public.live_channels
-  where on_air and heartbeat > now() - interval '90 seconds';
+  where on_air and heartbeat > now() - interval '5 minutes';
 grant select on public.live_now to anon, authenticated;
 
 -- going on or off air always clears the video

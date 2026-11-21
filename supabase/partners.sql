@@ -39,5 +39,5 @@ grant execute on function public.live_set(text, text, boolean, text) to authenti
 drop view if exists public.live_now;
 create view public.live_now as
   select kind, title, started_at, now_playing, label from public.live_channels
-  where on_air and heartbeat > now() - interval '90 seconds';
+  where on_air and heartbeat > now() - interval '5 minutes';
 grant select on public.live_now to anon, authenticated;

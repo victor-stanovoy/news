@@ -148,7 +148,7 @@
     });
     KINDS.forEach(function (k) {
       if (rows[k]) misses[k] = 0;
-      else if (prev[k] && rooms[k] && (misses[k] = (misses[k] || 0) + 1) < 2) { rows[k] = prev[k]; }     /* one empty answer: wait for the next check */
+      else if (prev[k] && rooms[k] && (misses[k] = (misses[k] || 0) + 1) < 12) { rows[k] = prev[k]; }     /* a few empty answers: while the picture is still arriving, keep playing */
       else if (prev[k] && rooms[k]) { misses[k] = 0; stop(k, true); setMsg(k, 'The broadcast has ended. Thanks for listening.'); }
       if (rows[k] && spl[k]) { stopSched(k, true); play(k); }       /* a live broadcast starts: join it */
       ui(k); syncYT(k);

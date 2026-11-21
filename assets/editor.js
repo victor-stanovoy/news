@@ -114,6 +114,26 @@
     }, Promise.resolve())
       .then(function () { return plain ? [].map.call(doc.body.children, function (e) { return e.textContent; }).join('\n\n') : doc.body.innerHTML; });
   }
+  /* Timers for a live broadcast. Browsers slow ordinary timers in background tabs (after about 5 minutes to one tick a minute), which froze the picture
+     and stopped the "still live" signal. A timer inside a worker is not slowed down. Falls back to a normal timer if workers are not allowed. */
+  var wt = { n: 0, map: {} };
+  function wInterval(fn, ms) {
+    var id = ++wt.n;
+    try {
+      var w = new Worker(URL.createObjectURL(new Blob(['setInterval(function(){postMessage(0)},' + ms + ')'], { type: 'text/javascript' })));
+      w.onmessage = function () { try { fn(); } catch (e) { /* keep going */ } };
+      wt.map[id] = function () { w.terminate(); };
+    } catch (e) { var t = setInterval(fn, ms); wt.map[id] = function () { clearInterval(t); }; }
+    return id;
+  }
+  function wClear(id) { if (id && wt.map[id]) { wt.map[id](); delete wt.map[id]; } }
+  var keep = { lock: null, wake: null };
+  function keepAwake(on) {            /* while on air: ask the browser not to freeze this tab or put the screen to sleep */
+    if (!on) { if (keep.lock) { keep.lock(); keep.lock = null; } if (keep.wake) { try { keep.wake.release(); } catch (e) { /* gone */ } keep.wake = null; } return; }
+    try { if (navigator.locks && !keep.lock) navigator.locks.request('spark-on-air', function () { return new Promise(function (res) { keep.lock = res; }); }); } catch (e) { /* not supported */ }
+    try { if (navigator.wakeLock && !keep.wake) navigator.wakeLock.request('screen').then(function (w) { keep.wake = w; w.addEventListener('release', function () { keep.wake = null; }); }, function () {}); } catch (e) { /* not supported */ }
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && anyAir()) keepAwake(true); });
   var SPARK = 'M12 0C13 7 17 11 24 12C17 13 13 17 12 24C11 17 7 13 0 12C7 11 11 7 12 0Z';
 
   var sb = null, me = { id: '', email: '', role: '', name: '' };
@@ -630,7 +650,7 @@
   }
   function stopLive(kind) {
     var cur = onAir[kind]; if (!cur) return Promise.resolve();
-    onAir[kind] = null; clearInterval(cur.timer); clearInterval(cur.clock);
+    onAir[kind] = null; wClear(cur.timer); clearInterval(cur.clock); if (!anyAir()) keepAwake(false);
     if (cur.stopMeter) cur.stopMeter();
     try { cur.room.disconnect(); } catch (e) { /* already gone */ }
     if (cur.mixer) { stopDeck(kind); cur.mixer.stop(); newDeckEl(kind); deckState[kind].ui(); }   /* the old player is tied to the closed mixer */
@@ -715,7 +735,7 @@
         musicGain.gain.setTargetAtTime(m.musicMuted ? 0 : m.musicVol / 100 * (m.duck && m.talking && !m.muted ? 0.2 : 1), ctx.currentTime, 0.2);
         padGain.gain.setTargetAtTime(m.padMuted ? 0 : m.padVol / 100, ctx.currentTime, 0.03);
       }
-      var timer = setInterval(function () {
+      var timer = wInterval(function () {
         an.getByteTimeDomainData(buf);
         var peak = 0; for (var i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128));
         var talking = peak > 14; if (talking !== m.talking) { m.talking = talking; apply(); }
@@ -728,7 +748,7 @@
       m.addPad = function (el) { try { ctx.createMediaElementSource(el).connect(padGain); } catch (e) { /* ignore */ } };   /* a jingle pad: its own channel, plays over the music */
       m.addTrack = function (tr) { try { ctx.createMediaStreamSource(new MediaStream([tr])).connect(dest); } catch (e) { /* ignore */ } };   /* the guests' voices */
       m.set = function (k, v) { m[k] = v; apply(); };
-      m.stop = function () { clearInterval(timer); stream.getTracks().forEach(function (t) { t.stop(); }); try { musicSrc.disconnect(); ctx.close(); } catch (e) { /* closed */ } };
+      m.stop = function () { wClear(timer); stream.getTracks().forEach(function (t) { t.stop(); }); try { musicSrc.disconnect(); ctx.close(); } catch (e) { /* closed */ } };
       if (ctx.state === 'suspended') ctx.resume();
       apply();
       return m;
@@ -767,7 +787,10 @@
         }).then(function (r) {
           if (r.error) throw r.error;
           onAir[kind] = { room: room, since: Date.now(), video: got.video, mixer: mixer,
-            timer: setInterval(function () { sb.rpc('live_beat', { p_kind: kind }); }, 30000) };
+            timer: wInterval(function () {
+              sb.rpc('live_beat', { p_kind: kind }).then(function (r) { if (r && r.error) return sb.auth.refreshSession().then(function () { return sb.rpc('live_beat', { p_kind: kind }); }); }, function () { /* offline for a moment: the next beat tries again */ });
+            }, 20000) };
+          keepAwake(true);
           paintTabs();
         }).catch(function (e) { try { room.disconnect(); } catch (x) { /* ignore */ } if (mixer) mixer.stop(); throw e; });
       }).then(function () { return got; });
@@ -1075,10 +1098,10 @@
       if (C.camStream) return Promise.resolve();
       return navigator.mediaDevices.getUserMedia({ video: Object.assign({ width: { ideal: W }, height: { ideal: H } }, deviceId ? { deviceId: { exact: deviceId } } : {}) }).then(function (st) {
         C.camStream = st; cam.srcObject = st; cam.play().catch(function () {});
-        if (!C.timer) C.timer = setInterval(draw, 33);   /* a timer keeps running while the tab is in the background (requestAnimationFrame would not) */
+        if (!C.timer) C.timer = wInterval(draw, 33);   /* a timer keeps running while the tab is in the background (requestAnimationFrame would not) */
       });
     };
-    C.ensureLoop = function () { if (!C.timer) C.timer = setInterval(draw, 33); };
+    C.ensureLoop = function () { if (!C.timer) C.timer = wInterval(draw, 33); };
     C.track = function () { if (!C.stream) C.stream = cv.captureStream(30); return C.stream.getVideoTracks()[0]; };
     C.useScreen = function () {
       if (C.scrStream) return Promise.resolve();
@@ -1100,7 +1123,7 @@
       return med;
     };
     C.stop = function () {
-      clearInterval(C.timer); C.timer = null;
+      wClear(C.timer); C.timer = null;
       [C.camStream, C.scrStream].forEach(function (st) { if (st) st.getTracks().forEach(function (t) { t.stop(); }); });
       C.camStream = C.scrStream = null; try { med.pause(); } catch (e) { /* ignore */ }
       if (C.stream) { C.stream.getTracks().forEach(function (t) { t.stop(); }); C.stream = null; }

@@ -14,11 +14,11 @@ alter table public.live_channels enable row level security;      -- no policies:
 revoke all on public.live_channels from anon, authenticated;
 
 -- What visitors may see: a channel counts as live only while its editor's page keeps sending a heartbeat,
--- so closing the browser or losing the connection takes it off air by itself within 90 seconds.
+-- so closing the browser or losing the connection takes it off air by itself within 5 minutes.
 drop view if exists public.live_now;
 create view public.live_now as
   select kind, title, started_at from public.live_channels
-  where on_air and heartbeat > now() - interval '90 seconds';
+  where on_air and heartbeat > now() - interval '5 minutes';
 grant select on public.live_now to anon, authenticated;
 
 alter table public.live_channels add column if not exists label text;
@@ -52,7 +52,7 @@ alter table public.live_channels add column if not exists now_playing text;
 drop view if exists public.live_now;
 create view public.live_now as
   select kind, title, started_at, now_playing, label from public.live_channels
-  where on_air and heartbeat > now() - interval '90 seconds';
+  where on_air and heartbeat > now() - interval '5 minutes';
 grant select on public.live_now to anon, authenticated;
 
 create or replace function public.live_playing(p_kind text, p_text text)

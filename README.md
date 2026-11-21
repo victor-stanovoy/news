@@ -394,3 +394,5 @@ In the **TV studio** window, the **Guests** panel lets you invite people onto th
 5. **Switch off** an invite and nobody new can join with it. Guests already in the room stay until they leave or you close the room.
 
 The guest page is not indexed by search engines. One-time setup (already done for the SparkNews project): run `supabase/guests.sql` and deploy the current `supabase/functions/livekit-token`.
+
+**Keeping a broadcast alive.** The studio tab sends a "still live" signal every 20 seconds, and a channel counts as live for 5 minutes after the last one. The signals and the studio picture run on timers that browsers cannot slow down in a background tab, and the studio asks the browser to keep the screen awake while you are on air. Still, keep the studio tab open, keep the computer plugged in and awake, and do not close the lid. Viewers keep playing through short gaps.
