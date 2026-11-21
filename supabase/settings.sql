@@ -30,7 +30,7 @@ begin
   if jsonb_typeof(p_data) is distinct from 'object' then raise exception 'Settings must be an object'; end if;
   select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into clean from jsonb_each(p_data) as t(k, v)
    where k = any (array['site_name','logo_left','logo_right','tagline','language','base_url','footer_text','nav_max','nav_order',
-                        'home_category_sections','most_read_count','breaking_max_age_days','ticker','live','newsletter','seo','privacy','polls','partners','editorial','announcements','maintenance','ui_language','theme','security']);
+                        'home_category_sections','most_read_count','breaking_max_age_days','ticker','live','newsletter','seo','privacy','polls','partners','editorial','announcements','maintenance','ui_language','theme','security','listen']);
   update public.site_settings set data = clean, updated_at = now(), updated_by = auth.uid() where id = 1;
   -- rebuild the website if instant updates are set up (ignored otherwise)
   begin

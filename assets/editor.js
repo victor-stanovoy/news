@@ -1512,7 +1512,15 @@
         th.value = V.theme || 'auto';
         return h('section', { class: 'panel' }, h('h3', { text: 'Language and look' }),
           field('Language of buttons and labels', ul, 'The six UN languages plus German. Visitors can change it in the footer and on the Settings page. Articles are not affected: use the translation box in each article for those.'),
-          field('Look for new visitors', th, 'Visitors can still pick their own on the Settings page.'));
+          field('Look for new visitors', th, 'Visitors can still pick their own on the Settings page.'),
+          h('h4', { text: 'Read-aloud button' }),
+          (function () {
+            var L = V.listen = V.listen || {}; if (L.enabled === undefined) L.enabled = true; if (!L.position) L.position = 'left';
+            var on = check('Offer read aloud on articles', L.enabled, function () { L.enabled = on.input.checked; mark(); });
+            var pos = h('select', { onchange: function () { L.position = pos.value; mark(); } }, [['left', 'Bottom left'], ['right', 'Bottom right']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
+            pos.value = L.position;
+            return h('div', {}, on.box, field('Where it sits', pos, 'Visitors can hide it for themselves, and turn it back on in their Settings.'));
+          })());
       }
       function securityPanel() {
         var G = V.security = V.security || {}; if (!G.geo_mode) G.geo_mode = 'off'; if (!G.geo_countries) G.geo_countries = [];

@@ -94,6 +94,7 @@ DEFAULT_CONFIG = {
     "maintenance": {"enabled": False, "title": "", "message": "", "eta": "", "salt": "", "hash": "", "iter": 150000},   # "be right back" page with a password bypass
     "ui_language": "auto",          # language of the buttons and labels: auto = the visitor's browser language, or ar, zh, en, fr, ru, es, de; "off" = no translation
     "theme": "auto",                # first look for new visitors: auto (their device), light, dark, sepia, midnight, contrast, forest
+    "listen": {"enabled": True, "position": "left"},     # the read-aloud button on articles: on/off and which side (left | right)
     "security": {"geo_mode": "off", "geo_countries": []},   # who may open the site by country: off | only (these) | except (these). A soft lock, see README
     "polls": {"enabled": True},     # visitor polls: card or full-screen banner (set up in the editor first, needs supabase/polls.sql)
     "live": {"enabled": True, "banner": False},      # "Live" page for live radio and TV (needs the database and supabase/live.sql); banner = "We are live" bar on every page while something is on air
@@ -577,6 +578,9 @@ def clean_settings(d):
         out["ui_language"] = v if v in UI_LANGS or v in ("auto", "off") else "auto"
     if isinstance(d.get("theme"), str):
         out["theme"] = d["theme"].strip().lower() if d["theme"].strip().lower() in THEMES else "auto"
+    if isinstance(d.get("listen"), dict):
+        o = d["listen"]
+        out["listen"] = {"enabled": o.get("enabled") is not False, "position": o.get("position") if o.get("position") in ("left", "right") else "left"}
     if isinstance(d.get("security"), dict):
         s = d["security"]; o = {}
         o["geo_mode"] = s.get("geo_mode") if s.get("geo_mode") in ("off", "only", "except") else "off"
@@ -1080,6 +1084,7 @@ class Site:
                 '</fieldset>'
                 '<fieldset><legend>Appearance</legend>' + radios("theme", [("auto", "Match my device"), ("light", "Light"), ("dark", "Dark"), ("sepia", "Sepia"), ("midnight", "Midnight"), ("contrast", "High contrast"), ("forest", "Forest")]) + '</fieldset>'
                 '<fieldset><legend>Language</legend><p class="small">Buttons and labels. Articles stay in the language they were written in unless a translation is offered.</p><select id="ui-lang-pref" name="uilang" aria-label="Language"><option value="auto">Automatic (my browser)</option><option value="en">English</option><option value="ar">العربية</option><option value="zh">中文</option><option value="fr">Français</option><option value="ru">Русский</option><option value="es">Español</option><option value="de">Deutsch</option></select></fieldset>'
+                '<fieldset><legend>Read aloud</legend><label class="switch"><input type="checkbox" name="listen" id="listen-pref"><span>Show the read-aloud button on articles</span></label></fieldset>'
                 '<p id="prefs-msg" class="small" role="status"></p></form></div>')
         return self.page("Settings", body, "../")
 
@@ -1368,6 +1373,7 @@ class Site:
             u, k = db_settings(self.cfg)
             data["polls"] = {"url": u, "key": k}
             polls_tag = f'<script src="{root}assets/polls.js?v={asset_ver("polls.js")}" defer></script>'
+        data["listen"] = {"on": bool((self.cfg.get("listen") or {}).get("enabled", True)), "pos": (self.cfg.get("listen") or {}).get("position", "left")}
         if self.cfg.get("ui_language") != "off":
             data["i18n"] = {"def": self.cfg.get("ui_language", "auto"), "site": self.cfg["language"][:2]}
         blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
@@ -1934,7 +1940,7 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
         (out / "editor").mkdir()
         url, key = db_settings(cfg)
         site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
-                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners", "ui_language", "theme", "security")
+                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners", "ui_language", "theme", "security", "listen")
         conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys},
                            "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js"), "schedule": asset_ver("schedule-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)

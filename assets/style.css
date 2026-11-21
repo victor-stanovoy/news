@@ -675,3 +675,6 @@ button:active,.btn:active{transform:scale(.97)}
 #ui-lang-pref{font:inherit;padding:8px 10px;border:1px solid var(--ink);border-radius:0;background:var(--bg);color:var(--ink)}
 [dir=rtl] .listen,[dir=rtl] .tools{direction:rtl}
 .listen-tip{flex:1 1 100%;max-width:340px}
+.listen.pos-right{inset-inline-start:auto;inset-inline-end:16px;bottom:72px;flex-direction:row-reverse}.listen.pos-right .listen-panel{border-inline-start:1px solid var(--line);border-inline-end:0}
+.lhide{font-size:12.5px;color:var(--muted);text-decoration:underline;flex:1 1 100%;text-align:start}
+@media (max-width:600px){.listen.pos-right{inset-inline-end:10px;bottom:68px}}

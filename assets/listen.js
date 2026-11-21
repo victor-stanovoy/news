@@ -4,6 +4,9 @@
   var synth = window.speechSynthesis;
   var art = document.querySelector('main article'); if (!art) return;
   var h1 = art.querySelector('h1'); if (!h1) return;
+  var cfgL = {}; try { cfgL = (JSON.parse((document.getElementById('spark-ticker-data') || {}).textContent || '{}') || {}).listen || {}; } catch (e) {}
+  if (cfgL.on === false) return;                                              /* switched off for the whole site in the editor */
+  try { if (localStorage.getItem('spark-listen-off') === '1') return; } catch (e) {}   /* or by this visitor, in Settings */
   var lang = (art.getAttribute('lang') || document.documentElement.lang || 'en').toLowerCase();
   var base = lang.split('-')[0];
 
@@ -19,6 +22,7 @@
             zh: ['收听', '暂停', '继续', '停止', '上一段', '下一段', '声音', '语速', '分钟', '你的设备没有这种语言的语音。'] };
   var L = T[base] || T.en;
 
+  var HIDE = { en: 'Hide this button (turn it back on in Settings)', de: 'Button ausblenden (in den Einstellungen wieder einschaltbar)', fr: 'Masquer ce bouton (réactivable dans Réglages)', es: 'Ocultar este botón (se reactiva en Ajustes)' };
   var HINT = { en: 'Tip: for a more natural voice open this page in Edge or Chrome, or on iPhone add an Enhanced voice under Settings → Accessibility → Spoken Content → Voices.',
                de: 'Tipp: Für eine natürlichere Stimme diese Seite in Edge oder Chrome öffnen, oder am iPhone unter Einstellungen → Bedienungshilfen → Gesprochene Inhalte → Stimmen eine erweiterte Stimme laden.',
                fr: 'Astuce : pour une voix plus naturelle, ouvrez la page dans Edge ou Chrome, ou sur iPhone ajoutez une voix améliorée dans Réglages → Accessibilité → Contenu énoncé → Voix.',
@@ -82,14 +86,17 @@
   var spd = el('select', { 'aria-label': L[7] });
   [0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75].forEach(function (x) { var o = el('option', { value: x, text: x + '×' }); spd.appendChild(o); });
   spd.value = store('speed') || '1'; if (spd.value !== (store('speed') || '1')) spd.value = '1';
+  var hideBtn = el('button', { type: 'button', 'class': 'lbtn lhide', text: HIDE[base] || HIDE.en });
+  hideBtn.addEventListener('click', function () { try { localStorage.setItem('spark-listen-off', '1'); } catch (e) {} finish && finish(); wrap.remove(); });
   var tip = el('p', { 'class': 'listen-note listen-tip' });
   var note = el('p', { 'class': 'listen-note', role: 'status', 'aria-live': 'polite' });
   panel.appendChild(el('div', { 'class': 'listen-row lmain' }, [prev, next, bar, gear, stop]));
-  var setrow = el('div', { 'class': 'listen-row lset', hidden: '' }, [el('label', {}, [el('span', { text: L[6] }), sel]), el('label', {}, [el('span', { text: L[7] }), spd]), tip]);
+  var setrow = el('div', { 'class': 'listen-row lset', hidden: '' }, [el('label', {}, [el('span', { text: L[6] }), sel]), el('label', {}, [el('span', { text: L[7] }), spd]), hideBtn, tip]);
   panel.appendChild(setrow);
   gear.addEventListener('click', function () { var o = setrow.hidden; setrow.hidden = !o; gear.setAttribute('aria-expanded', o ? 'true' : 'false'); });
   panel.appendChild(note);
   wrap.appendChild(main); wrap.appendChild(panel);
+  if (cfgL.pos === 'right') wrap.classList.add('pos-right');
   document.body.appendChild(wrap);
   /* a small dock that follows the reader down the article and steps aside when the article is out of view */
   if ('IntersectionObserver' in window) new IntersectionObserver(function (l) { wrap.classList.toggle('away', !l[0].isIntersecting && state === 'idle'); }, { threshold: 0 }).observe(art);

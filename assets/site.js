@@ -165,6 +165,9 @@ window.addEventListener('error', function (e) { window.__sparkErrors.push(e.mess
   if (form) {
     var pr = getPrefs(), siteOn = !!(site && site.enabled && items.length);
     var q = function (n) { return form.elements[n]; };
+    var lp = document.getElementById('listen-pref');
+    if (lp) { try { lp.checked = localStorage.getItem('spark-listen-off') !== '1'; } catch (e) { lp.checked = true; }
+      lp.addEventListener('change', function () { try { if (lp.checked) localStorage.removeItem('spark-listen-off'); else localStorage.setItem('spark-listen-off', '1'); } catch (e) {} }); }
     var uiSel = document.getElementById('ui-lang-pref');
     if (uiSel) uiSel.addEventListener('change', function () { if (window.SparkI18n) window.SparkI18n.set(uiSel.value); });
     var themeNow = 'auto';
