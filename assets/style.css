@@ -696,3 +696,47 @@ button:active,.btn:active{transform:scale(.97)}
 .gmsg{min-height:1.4em;color:var(--text2)}.gmsg.err{color:#c4162f;font-weight:700}
 .gtips{color:var(--muted);font-size:14px;padding-inline-start:18px}
 @keyframes lpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.88)}}
+
+/* ---- polish: flat colour only, no gradients ---- */
+.ph{background:hsl(var(--h) 38% 26%)}
+.hero .ct{background:rgba(10,8,40,.88);padding:18px 26px 22px;border-top:4px solid var(--spark)}
+.lost2{background:var(--head)}.lost2::before{display:none}
+html.maint .mnt{background:var(--head)}
+.vgate{background:var(--head)}.vgate::before{display:none}
+.rprog{background:var(--spark)}
+.lis-now{background:rgba(254,44,85,.1)}
+.meter i{background:#2fbf71!important}
+
+/* ---- polish: small details ---- */
+html{scroll-behavior:smooth;scroll-padding-top:72px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+:root{accent-color:var(--accent)}
+::selection{background:var(--spark);color:#fff}
+a,button,summary,label{-webkit-tap-highlight-color:transparent}
+:where(a,button,input,select,textarea,summary,[tabindex]):focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.thumb img,.body img,.hero img,.rel img{background:var(--soft)}
+:root[data-theme=dark] .body img,:root[data-theme=midnight] .body img,:root[data-theme=forest] .body img,:root[data-theme=dark] .thumb img,:root[data-theme=midnight] .thumb img,:root[data-theme=forest] .thumb img{filter:brightness(.9)}
+.body{text-wrap:pretty}
+.body a{text-decoration-thickness:1px;text-underline-offset:3px;transition:text-decoration-thickness .15s,color .15s}
+.body a:hover{text-decoration-thickness:2px}
+.body a[href^="http"]:not([href*="sparknews.cc"]):not(:has(img))::after{content:"\2197";font-size:.72em;margin-inline-start:.18em;opacity:.65}
+.body li::marker{color:var(--accent)}
+time,.ltime,.airtime,.ctime{font-variant-numeric:tabular-nums}
+.card{border-bottom:3px solid transparent;transition:transform .3s cubic-bezier(.2,.9,.3,1),border-color .25s}
+.card:hover{border-bottom-color:var(--spark)}
+.navbar{transition:transform .28s cubic-bezier(.3,.7,.2,1)}
+.navbar.tuck{transform:translateY(-101%)}
+.share .copylink{font:inherit;background:none;border:1px solid currentColor;color:inherit;padding:6px 12px;border-radius:0;cursor:pointer;transition:background .2s,color .2s}
+.share .copylink:hover{background:var(--ink);color:var(--bg)}
+.share .copylink.done{background:#2fbf71;border-color:#2fbf71;color:#fff}
+/* reading size: chosen in Settings */
+:root[data-size=large] .body{font-size:1.18em}
+:root[data-size=small] .body{font-size:.92em}
+:root[data-size=large] .card h3{font-size:1.08em}
+/* printing: just the article */
+@media print{
+  .top,.navbar,.share,.nlbox,.listen,.totop,.rprog,footer,.rel,.pollcard,.ajump,.cc,.langs,.chips,.adslot,.tools{display:none!important}
+  body{background:#fff;color:#000}.body{font-size:12pt;line-height:1.5}
+  .body a{color:#000;text-decoration:underline}.body a[href^="http"]::after{content:" (" attr(href) ")";font-size:.8em;opacity:1}
+  img{max-width:100%;break-inside:avoid;filter:none!important}h1,h2,h3{break-after:avoid}
+}

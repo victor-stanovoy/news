@@ -178,6 +178,8 @@ window.addEventListener('error', function (e) { window.__sparkErrors.push(e.mess
     [].forEach.call(form.querySelectorAll('input[name=mode]'), function (r) { r.checked = r.value === (pr.mode || (site && site.mode) || 'scroll'); });
     [].forEach.call(form.querySelectorAll('input[name=speed]'), function (r) { r.checked = r.value === (pr.speed || 'normal'); });
     [].forEach.call(form.querySelectorAll('input[name=theme]'), function (r) { r.checked = r.value === themeNow; });
+    var sizeNow = ''; try { sizeNow = localStorage.getItem('spark-size') || ''; } catch (e) {}
+    [].forEach.call(form.querySelectorAll('input[name=size]'), function (r) { r.checked = r.value === sizeNow; });
     var msg = document.getElementById('prefs-msg');
     var say = function (m) { if (msg) msg.textContent = m; };
     function sync() {
@@ -190,6 +192,11 @@ window.addEventListener('error', function (e) { window.__sparkErrors.push(e.mess
       if (th) {
         try { if (th.value === 'auto') localStorage.removeItem('spark-theme'); else localStorage.setItem('spark-theme', th.value); } catch (e) { ok = false; }
         if (th.value === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = th.value;
+      }
+      var sz = form.querySelector('input[name=size]:checked');
+      if (sz) {
+        try { if (!sz.value) localStorage.removeItem('spark-size'); else localStorage.setItem('spark-size', sz.value); } catch (e) { ok = false; }
+        if (!sz.value) document.documentElement.removeAttribute('data-size'); else document.documentElement.dataset.size = sz.value;
       }
       form.classList.toggle('tab-off', !p.tab);
       say(ok ? 'Saved on this device.' : 'Could not save: your browser is blocking storage.');
@@ -238,4 +245,42 @@ document.addEventListener('visibilitychange', function () { document.documentEle
   var nb = document.querySelector('.navbar'); if (!nb) return;
   function f() { nb.classList.toggle('stuck', nb.getBoundingClientRect().top <= 0 && window.scrollY > 0); }
   window.addEventListener('scroll', f, { passive: true }); f();
+})();
+
+/* ---- small comforts ---- */
+(function () {
+  var root = document.documentElement;
+  /* the browser's address bar takes the colour of the current look */
+  function tint() {
+    var m = document.querySelector('meta[name=theme-color]'); if (!m || !document.body) return;
+    var c = getComputedStyle(document.body).backgroundColor; if (c && c !== 'rgba(0, 0, 0, 0)') m.setAttribute('content', c);
+  }
+  tint(); try { new MutationObserver(tint).observe(root, { attributes: true, attributeFilter: ['data-theme'] }); } catch (e) {}
+  /* "/" jumps to search, like most news and code sites */
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName) || (e.target && e.target.isContentEditable)) return;
+    var box = document.querySelector('input[type=search], #q'); if (box) { e.preventDefault(); box.focus(); return; }
+    var link = document.querySelector('a[href$="search.html"]'); if (link) { e.preventDefault(); location.href = link.href; }
+  });
+  /* copy link */
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('.copylink'); if (!b) return;
+    var url = b.getAttribute('data-copy') || location.href.split('#')[0], old = b.textContent;
+    function done(okk) { b.textContent = okk ? 'Copied' : 'Press Ctrl+C'; b.classList.toggle('done', okk); setTimeout(function () { b.textContent = old; b.classList.remove('done'); }, 1600); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(function () { done(true); }, function () { done(false); }); else done(false);
+  });
+  /* the section bar tucks away while you read down the page and returns as soon as you scroll up */
+  var nav = document.querySelector('.navbar');
+  if (nav && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+    var last = window.scrollY, tick = false;
+    addEventListener('scroll', function () {
+      if (tick) return; tick = true;
+      requestAnimationFrame(function () {
+        tick = false; var y = window.scrollY, d = y - last;
+        if (Math.abs(d) < 8) return;
+        nav.classList.toggle('tuck', d > 0 && y > 360 && !nav.contains(document.activeElement)); last = y;
+      });
+    }, { passive: true });
+    nav.addEventListener('focusin', function () { nav.classList.remove('tuck'); });
+  }
 })();

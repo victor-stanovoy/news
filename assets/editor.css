@@ -148,7 +148,7 @@ dialog.small{height:fit-content;max-height:86vh;width:min(620px,94vw)}
 @media (max-width:820px){.dashgrid{grid-template-columns:minmax(0,1fr)}.dash{padding:16px 14px 50px}}
 .btn.big{padding:12px 22px;font-size:16px}.btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
 .metrow{display:flex;align-items:center;gap:12px;margin:6px 0 10px;font-size:13px;color:var(--muted)}
-.meter{flex:1;height:10px;border-radius:0;background:rgba(127,127,127,.2);overflow:hidden}.meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,#14804a,#e0b100 70%,#d71920)}
+.meter{flex:1;height:10px;border-radius:0;background:rgba(127,127,127,.2);overflow:hidden}.meter i{display:block;height:100%;width:0;background:#2fbf71}
 .livepreview{width:100%;max-height:260px;background:#000;border-radius:0;margin-bottom:10px}
 .hint.onair{color:var(--bad);font-weight:700}
 .dash .hint{color:var(--muted);font-size:13px}

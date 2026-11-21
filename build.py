@@ -871,11 +871,9 @@ def make_preview(dest, title, kicker, cover_urls, brand, tagline=""):
             d.rectangle((x - 2, y - 2, x + 1, y + h), fill=(17, 12, 74)); d.rectangle((x, y - 2, x + w, y + 1), fill=(17, 12, 74))
     else:
         d = ImageDraw.Draw(img)
-        for i in range(H):                   # soft brand gradient
-            t = i / H; d.line((0, i, W, i), fill=(int(17 + 60 * t), int(12 + 4 * t), int(74 - 10 * t)))
+        d.rectangle((0, 0, W, H), fill=(17, 12, 74))      # flat brand colour
     shade = Image.new("RGBA", (W, H), (0, 0, 0, 0)); sd = ImageDraw.Draw(shade)
-    for i in range(H // 3, H):               # dark fade at the bottom so the text always reads
-        sd.line((0, i, W, i), fill=(10, 7, 45, int(235 * ((i - H // 3) / (H - H // 3)) ** 1.4)))
+    sd.rectangle((0, H - 330, W, H), fill=(10, 7, 45, 222))     # a flat dark band at the bottom so the text always reads
     img = Image.alpha_composite(img.convert("RGBA"), shade).convert("RGB"); d = ImageDraw.Draw(img)
     d.rectangle((0, 0, 14, H), fill=(254, 44, 85))
     x0 = 56
@@ -1026,7 +1024,7 @@ class Site:
         return (f'<!doctype html><html lang="{esc(cfg["language"])}"><head><meta charset="utf-8">'
                 f'<meta name="viewport" content="width=device-width,initial-scale=1">{self.seo_tags(ld)}'
                 f'<meta name="color-scheme" content="light dark">'
-                f'<script>try{{var th=localStorage.getItem("spark-theme")||{dtheme};if(th)document.documentElement.dataset.theme=th}}catch(e){{}}</script>{self.geo_gate()}'
+                f'<script>try{{var th=localStorage.getItem("spark-theme")||{dtheme};if(th)document.documentElement.dataset.theme=th;var sz=localStorage.getItem("spark-size");if(sz)document.documentElement.dataset.size=sz}}catch(e){{}}</script>{self.geo_gate()}'
                 f'<title>{esc(full)}</title><meta name="description" content="{esc(desc)}">{og}{alt}{icon}'
                 f'<link rel="stylesheet" href="{root}assets/style.css?v={asset_ver("style.css")}">{self.accent_css()}</head>')
 
@@ -1083,6 +1081,7 @@ class Site:
                 '<p id="prefs-safari" class="small" hidden>Safari shows only about 20 characters of a tab title, and hides titles when there is just one tab open, so the ticker is shortened there.</p>'
                 '</fieldset>'
                 '<fieldset><legend>Appearance</legend>' + radios("theme", [("auto", "Match my device"), ("light", "Light"), ("dark", "Dark"), ("sepia", "Sepia"), ("midnight", "Midnight"), ("contrast", "High contrast"), ("forest", "Forest")]) + '</fieldset>'
+                '<fieldset><legend>Text size</legend>' + radios("size", [("small", "Smaller"), ("", "Standard"), ("large", "Larger")]) + '</fieldset>'
                 '<fieldset><legend>Language</legend><p class="small">Buttons and labels. Articles stay in the language they were written in unless a translation is offered.</p><select id="ui-lang-pref" name="uilang" aria-label="Language"><option value="auto">Automatic (my browser)</option><option value="en">English</option><option value="ar">العربية</option><option value="zh">中文</option><option value="fr">Français</option><option value="ru">Русский</option><option value="es">Español</option><option value="de">Deutsch</option></select></fieldset>'
                 '<fieldset><legend>Read aloud</legend><label class="switch"><input type="checkbox" name="listen" id="listen-pref"><span>Show the read-aloud button on articles</span></label></fieldset>'
                 '<p id="prefs-msg" class="small" role="status"></p></form></div>')
@@ -1658,7 +1657,8 @@ class Site:
                          f'<a href="https://twitter.com/intent/tweet?url={share_url}&amp;text={t}" target="_blank" rel="noopener">X</a>'
                          f'<a href="https://www.facebook.com/sharer/sharer.php?u={share_url}" target="_blank" rel="noopener">Facebook</a>'
                          f'<a href="https://wa.me/?text={t}%20{share_url}" target="_blank" rel="noopener">WhatsApp</a>'
-                         f'<a href="mailto:?subject={t}&amp;body={share_url}">Email</a></div>')
+                         f'<a href="mailto:?subject={t}&amp;body={share_url}">Email</a>'
+                         f'<button type="button" class="copylink" data-copy="{share_url}">Copy link</button></div>')
 
         if fullscreen:
             # the whole page becomes the HTML article: one slim bar to go back, then the content fills the window
