@@ -382,3 +382,15 @@ In the article editor, open **Translations**, tell it which language the article
 - **Country** (Settings → Security: country): only these / all except these. It runs in the browser, so it is a soft lock (a VPN gets round it; crawlers and link previews are let through; a failed lookup lets people in). For a hard lock use Cloudflare country rules.
 - **School passwords**: set them in Settings → Partners → Password protected. They are stored write-only (nobody can read them back). Run `supabase/settings.sql` once, and add the GitHub Actions secret `SUPABASE_SERVICE_KEY` (Supabase → Project Settings → API Keys → service_role) so the build can read them. The older `SPARK_PARTNER_PASSWORDS` secret still works.
 - **Read aloud**: a small speaker button at the bottom left of every article. It expands into a slim control bar (play, skip, progress, voice and speed under "⋯") and steps aside when the article is off screen.
+
+## TV guests (QR code invites)
+
+In the **TV studio** window, the **Guests** panel lets you invite people onto the show from their own phone or computer.
+
+1. Press **Create invite** (optionally name it, choose how long it works and how many devices may use it). You get a **QR code** and a link: copy the link, or download or copy the QR, and send or show it to your guests.
+2. A guest opens it, types their name and presses **Join with camera and microphone**. They can also **Share my screen**, mute themselves or turn the camera off. One invite works on several devices (up to the number you chose): a guest's camera, microphone and screen are separate sources.
+3. Press **Open guest room** to see and hear them. They wait in a private room: **nothing is broadcast until you pick it.** Guests hear you and each other (use headphones, both sides).
+4. Put guests on air with the buttons under each picture (**Full screen**, **With me** = split screen, **+ Grid** for a grid of up to four), or the scenes **Guest** (key 8), **Guest + me** (9) and **Guests grid** (0). Guests' voices are mixed into the broadcast; mute or lower any guest in the list.
+5. **Switch off** an invite and nobody new can join with it. Guests already in the room stay until they leave or you close the room.
+
+The guest page is not indexed by search engines. One-time setup (already done for the SparkNews project): run `supabase/guests.sql` and deploy the current `supabase/functions/livekit-token`.

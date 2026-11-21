@@ -49,11 +49,11 @@ export async function handle(req: Request): Promise<Response> {
     lkSecret = saved.livekit_api_secret || env("LIVEKIT_API_SECRET");
   const needsLiveKit = !(lkUrl && lkKey && lkSecret);
 
-  let input: { kind?: string; mode?: string };
+  let input: { kind?: string; mode?: string; code?: string; name?: string };
   try { input = await req.json(); } catch { return reply({ error: "Bad request" }, 400); }
   const kind = input.kind, mode = input.mode;
   if (mode !== "check" && !/^[a-z0-9][a-z0-9-]{1,30}$/.test(String(kind || ""))) return reply({ error: "Unknown channel" }, 400);
-  if (mode !== "publish" && mode !== "watch" && mode !== "check") return reply({ error: "Unknown mode" }, 400);
+  if (mode !== "publish" && mode !== "watch" && mode !== "check" && mode !== "guest" && mode !== "green") return reply({ error: "Unknown mode" }, 400);
 
   const apikey = req.headers.get("apikey") ?? "";
   const room = `sparknews-${kind}`;
@@ -74,6 +74,48 @@ export async function handle(req: Request): Promise<Response> {
       const j = await lr.json().catch(() => ({}));
       return reply({ ok: true, rooms: Array.isArray(j.rooms) ? j.rooms.length : 0 });
     } catch { return reply({ ok: false, error: "Could not reach LiveKit. Check the address (it looks like wss://yourproject.livekit.cloud)." }); }
+  }
+
+  // Guests: a person with an invite link (the QR code) joins a separate "green room" next to the broadcast room.
+  // The host studio picks what from the green room goes on air. Guests never publish into the broadcast room itself.
+  if (mode === "guest") {
+    const code = String(input.code || "");
+    if (!/^[a-f0-9]{32}$/.test(code)) return reply({ error: "This invite link is not valid." }, 403);
+    const q = `${dbUrl}/rest/v1/guest_invites?code=eq.${code}&kind=eq.${kind}&revoked=eq.false&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=max_devices,label`;
+    const ir = await fetch(q, { headers: { apikey: svc, Authorization: `Bearer ${svc}` } });
+    const inv = ir.ok ? await ir.json() : [];
+    if (!Array.isArray(inv) || inv.length === 0) return reply({ error: "This invite has expired or was switched off. Ask the studio for a new link." }, 403);
+    const gRoom = `${room}-guests`, prefix = `g-${code.slice(0, 8)}-`;
+    try {
+      const host = lkUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/+$/, "");
+      const adm = await signToken(lkKey, lkSecret, { sub: "sparknews-guests", video: { roomAdmin: true, room: gRoom } }, 60);
+      const lr = await fetch(`${host}/twirp/livekit.RoomService/ListParticipants`, { method: "POST", headers: { Authorization: `Bearer ${adm}`, "Content-Type": "application/json" }, body: JSON.stringify({ room: gRoom }) });
+      if (lr.ok) {
+        const j = await lr.json().catch(() => ({}));
+        const n = (Array.isArray(j.participants) ? j.participants : []).filter((p: { identity?: string }) => String(p.identity || "").startsWith(prefix)).length;
+        if (n >= (inv[0].max_devices || 4)) return reply({ error: `This invite is already in use on ${n} devices, which is the limit.` }, 409);
+      }
+    } catch { /* if the count fails, let the guest in */ }
+    const name = String(input.name || "Guest").replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, 40) || "Guest";
+    const token = await signToken(lkKey, lkSecret, {
+      sub: `${prefix}${crypto.randomUUID().slice(0, 6)}`, name,
+      video: { room: gRoom, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: false },
+    }, 4 * 3600);
+    return reply({ token, url: lkUrl, room: gRoom, label: inv[0].label || "" });
+  }
+
+  if (mode === "green") {                                   // the studio looks at the green room
+    const auth = req.headers.get("authorization") ?? "";
+    if (!/^Bearer eyJ/.test(auth)) return reply({ error: "Please sign in again." }, 401);
+    const r = await fetch(`${dbUrl}/rest/v1/rpc/editor_role`, { method: "POST", headers: { apikey, Authorization: auth, "Content-Type": "application/json" }, body: "{}" });
+    const role = r.ok ? await r.json() : null;
+    if (role !== "admin" && role !== "editor") return reply({ error: "Only editors and admins can open the guest room." }, 403);
+    const gRoom = `${room}-guests`;
+    const token = await signToken(lkKey, lkSecret, {
+      sub: `host-green-${crypto.randomUUID().slice(0, 6)}`, name: "Studio",
+      video: { room: gRoom, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: false },
+    }, 6 * 3600);
+    return reply({ token, url: lkUrl, room: gRoom });
   }
 
   if (mode === "publish") {

@@ -614,12 +614,12 @@
     });
     return lkLoading;
   }
-  function liveToken(kind) {
+  function liveToken(kind, mode) {
     return sb.auth.getSession().then(function (s) {
       var tok = s.data && s.data.session && s.data.session.access_token;
       return fetch(cfg.url.replace(/\/+$/, '') + '/functions/v1/livekit-token', {
         method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.anon_key, Authorization: 'Bearer ' + tok },
-        body: JSON.stringify({ kind: kind, mode: 'publish' })
+        body: JSON.stringify({ kind: kind, mode: mode || 'publish' })
       });
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
@@ -726,6 +726,7 @@
       function peakOf(node, b) { node.getByteTimeDomainData(b); var pk = 0; for (var i = 0; i < b.length; i++) pk = Math.max(pk, Math.abs(b[i] - 128)); return Math.min(1, pk / 128 * 1.4); }
       m.levels = function () { return { mic: m.muted ? 0 : peakOf(an, buf), music: peakOf(anM, bufM), pads: peakOf(anP, bufP) }; };
       m.addPad = function (el) { try { ctx.createMediaElementSource(el).connect(padGain); } catch (e) { /* ignore */ } };   /* a jingle pad: its own channel, plays over the music */
+      m.addTrack = function (tr) { try { ctx.createMediaStreamSource(new MediaStream([tr])).connect(dest); } catch (e) { /* ignore */ } };   /* the guests' voices */
       m.set = function (k, v) { m[k] = v; apply(); };
       m.stop = function () { clearInterval(timer); stream.getTracks().forEach(function (t) { t.stop(); }); try { musicSrc.disconnect(); ctx.close(); } catch (e) { /* closed */ } };
       if (ctx.state === 'suspended') ctx.resume();
@@ -754,6 +755,7 @@
         var mic = { echoCancellation: S.echo !== false, noiseSuppression: S.noise !== false, autoGainControl: S.agc !== false };
         if (S.mic) mic.deviceId = S.mic;
         if (mixer && hooks.studio) mixer.addElement(hooks.studio.mediaEl());
+        if (mixer && window.SparkGreen) window.SparkGreen.feed(mixer);
         if (mixer) { var dk = deckFor(kind); mixer.musicMuted = !!dk.musMuted; mixer.padMuted = !!dk.padMuted; mixer.padVol = S.padVol == null ? 100 : S.padVol; mixer.micVol = S.micVol == null ? 100 : S.micVol; mixer.musicVol = S.musicVol == null ? 80 : S.musicVol; mixer.duck = S.duck !== false; mixer.set('muted', !!hooks.muted); }
         var steps = [mixer ? lp.publishTrack(new LK.LocalAudioTrack(mixer.track), { source: LK.Track.Source.Microphone }) : lp.setMicrophoneEnabled(true, mic)];
         if (typeOf(kind) === 'tv') {
@@ -968,7 +970,7 @@
 
 
   /* ---------------------------------------------------------------- TV studio: program canvas (camera, screen, pictures, videos) */
-  var STUDIO_SCENES = [['cam', 'Camera', '1'], ['media', 'Picture / video', '2'], ['pip', 'Picture + me', '3'], ['screen', 'Screen', '4'], ['screenpip', 'Screen + me', '5'], ['black', 'Black', '6'], ['slate', 'Starting soon', '7']];
+  var STUDIO_SCENES = [['cam', 'Camera', '1'], ['media', 'Picture / video', '2'], ['pip', 'Picture + me', '3'], ['screen', 'Screen', '4'], ['screenpip', 'Screen + me', '5'], ['black', 'Black', '6'], ['slate', 'Starting soon', '7'], ['guest', 'Guest', '8'], ['guestme', 'Guest + me', '9'], ['grid', 'Guests grid', '0']];
   function makeCompositor(res) {
     var W = res[0], H = res[1];
     var cv = h('canvas', { class: 'livepreview program', width: W, height: H, 'aria-label': 'What the audience sees' });
@@ -1024,13 +1026,35 @@
         if (a <= 0) C.fadeAt = 0; else { g.save(); g.globalAlpha = a; g.drawImage(snap, 0, 0, W, H); g.restore(); }
       }
     }
+    function gName(t, x, y, w) {
+      var fs = Math.round(H * 0.034), pad = Math.round(fs * 0.5); g.font = '700 ' + fs + 'px system-ui, Arial, sans-serif'; g.textBaseline = 'middle';
+      var tw = Math.min(g.measureText(t).width, w * 0.8), bh = fs + pad;
+      g.fillStyle = 'rgba(14,17,22,.82)'; g.fillRect(x, y - bh, tw + pad * 2 + 6, bh); g.fillStyle = '#fe2c55'; g.fillRect(x, y - bh, 6, bh); g.fillStyle = '#fff'; g.fillText(t, x + pad + 6, y - bh / 2, w * 0.8);
+    }
+    function drawGuests(sc, camOk) {
+      var all = C.guests || [], sel = (C.guestSel || []).map(function (id) { return all.filter(function (x) { return x.id === id; })[0]; }).filter(Boolean);
+      if (!sel.length) sel = all.slice(0, 1);
+      function tile(gu, x, y, w, h2) { if (gu.v.videoWidth) fit(gu.v, gu.v.videoWidth, gu.v.videoHeight, x, y, w, h2, !gu.screen); gName(gu.name, x + 10, y + h2 - 10, w); }
+      if (!sel.length) { g.fillStyle = '#fff'; g.font = '700 ' + Math.round(H * 0.04) + 'px system-ui, Arial, sans-serif'; g.textAlign = 'center'; g.fillText('Waiting for a guest\u2026', W / 2, H / 2); g.textAlign = 'start'; return; }
+      if (sc === 'guest') tile(sel[0], 0, 0, W, H);
+      else if (sc === 'guestme') {
+        var half = Math.round(W / 2);
+        if (camOk) fit(cam, cam.videoWidth, cam.videoHeight, 0, 0, half, H, true);
+        tile(sel[0], half, 0, W - half, H); g.fillStyle = '#fe2c55'; g.fillRect(half - 3, 0, 6, H);
+      } else {
+        var n = Math.min(4, sel.length), cols = n === 1 ? 1 : 2, rows = Math.ceil(n / cols), tw2 = Math.floor(W / cols), th2 = Math.floor(H / rows);
+        for (var i = 0; i < n; i++) tile(sel[i], (i % cols) * tw2, Math.floor(i / cols) * th2, tw2, th2);
+        g.fillStyle = '#110c4a'; if (cols > 1) g.fillRect(tw2 - 2, 0, 4, H); if (rows > 1) g.fillRect(0, th2 - 2, W, 4);
+      }
+    }
     function draw() { drawScene(); overlays(); }
     function drawScene() {
       g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
       var sc = C.scene, camOk = cam.videoWidth > 0;
       var mediaSrc = img && C.media && C.media.kind === 'image' ? img : (C.media && C.media.kind === 'video' ? med : null);
       var mw = mediaSrc === img && img ? img.naturalWidth : med.videoWidth, mh = mediaSrc === img && img ? img.naturalHeight : med.videoHeight;
-      if (sc === 'slate') drawSlate();
+      if (sc === 'guest' || sc === 'guestme' || sc === 'grid') drawGuests(sc, camOk);
+      else if (sc === 'slate') drawSlate();
       else if (sc === 'cam' && camOk) fit(cam, cam.videoWidth, cam.videoHeight, 0, 0, W, H, true);
       else if ((sc === 'media' || sc === 'pip') && mediaSrc) fit(mediaSrc, mw, mh, 0, 0, W, H, false);
       else if ((sc === 'screen' || sc === 'screenpip') && scr.videoWidth) fit(scr, scr.videoWidth, scr.videoHeight, 0, 0, W, H, false);
@@ -1273,9 +1297,11 @@
 
     function studioSection() {
       if (!tvComp) tvComp = makeCompositor(RES[S.res] || RES['720']);
+      window.__tvComp = tvComp;     /* lets tests drive the studio picture */
       var comp = tvComp, sceneBtns = {}, camMsg = h('p', { class: 'hint' });
       comp.ensureLoop();
       function setScene(k) {
+        if ((k === 'guest' || k === 'guestme' || k === 'grid') && !(comp.guests || []).length) { toast('Open the guest room below and wait for a guest to join first', true); return; }
         var need = k.indexOf('screen') === 0 && !comp.scrStream ? comp.useScreen() : Promise.resolve();
         need.then(function () {
           if ((k === 'media' || k === 'pip') && !comp.media) { toast('Pick a picture or video below first', true); return; }
@@ -1320,7 +1346,11 @@
           h('div', {}, comp.cv, bar, h('p', { class: 'hint', text: 'Keys 1 to 7 switch scenes; F fade, L live bug, T ticker. The picture above is exactly what is broadcast.' }), more,
             h('div', { class: 'uprow' }, cap, capBtn), h('div', { class: 'btnrow' }, camBtn), camMsg),
           h('div', {}, h('h3', { text: 'Pictures and videos' }), mediaPanel(comp, stops, setScene))));
-      return box;
+      var gHost = h('div', { class: 'guesthost' });
+      Promise.all([loadScript('../assets/vendor/qrcode.js'), loadScript('../assets/greenroom.js?v=' + ((cfg.ver || {}).green || ''))]).then(function () {
+        gHost.replaceChildren(window.SparkGreen.mount({ h: h, sb: sb, comp: comp, kind: kind, toast: toast, errText: errText, site: cfg.site || {}, loadScript: loadScript, loadLiveKit: loadLiveKit, token: liveToken, micId: function () { return S.mic; }, getMixer: function () { return onAir[kind] && onAir[kind].mixer; }, showGuest: function (scene, id) { comp.guestSel = [id].concat(comp.guestSel.filter(function (x) { return x !== id; })); setScene(scene); } }).el);
+      }).catch(function () { gHost.replaceChildren(h('p', { class: 'hint err', text: 'The guest tools could not load. Reload the page.' })); });
+      return h('div', {}, box, gHost);
     }
 
     /* come back to a running broadcast after visiting another window */
