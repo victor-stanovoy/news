@@ -408,3 +408,9 @@ When the site is built, the About and Privacy pages are machine-translated into 
 
 ## Saved articles
 Every article has a Save button next to Share. Saved articles are listed in Settings, under "Saved articles", and can be removed there. They are stored only in the reader's browser (when the Preferences choice in the cookie banner allows it).
+
+## Sparks (quick reads)
+In the editor, the Publishing box has a **Format** choice: Article or **Spark** (a short read). A Spark keeps its section, but it never becomes the featured or latest story, has its own page at `/sparks/`, and shows in the home page's "Sparks" widget with a small tag. The All articles page has All / Articles / Sparks filter buttons. Run `supabase/sparks.sql` once (already applied to the live project). The name can be changed with `"quick_name"` in `site.json`.
+
+## Impressum
+`/impressum/` is the legal notice (Austria: ECG, MedienG, UGB), linked in the footer. Fill in your details in `site.json` under `"impressum"` (`owner`, `legal_form`, `address`, `email`, `phone`, `uid`, `register`, `responsible`, `supervisory`, `purpose`, `extra`). Empty lines are left out.

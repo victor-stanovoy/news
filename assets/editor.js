@@ -2010,6 +2010,11 @@
     f.published = h('input', { type: 'datetime-local', value: toLocal(a.published_at), onchange: mark });
     var tk = check('Taken down (hide from the website)', a.taken_down, mark); f.takenDown = tk.input;
     var ft = check('Featured: main story on the homepage', a.is_featured, mark); f.featured = ft.input;
+    f.format = h('select', { onchange: function () { mark(); } },
+      h('option', { value: 'article', text: 'Article' }), h('option', { value: 'quick', text: 'Spark: a short read (own page, never featured)' }));
+    f.format.onchange = function () { mark(); if (f.format.value === 'quick') { f.featured.checked = false; } f.featured.disabled = f.format.value === 'quick'; };
+    f.format.value = a.article_format === 'quick' ? 'quick' : 'article';
+    f.featured.disabled = f.format.value === 'quick';
     var br = check('Breaking news banner', a.is_breaking, function () { mark(); sync(); }); f.breaking = br.input;
     f.breakingText = h('input', { type: 'text', value: a.breaking_description || '', placeholder: 'Banner text (defaults to the headline)', oninput: mark });
     var schedField = field('Go live at', f.scheduled), pubField = field('Publish date', f.published, 'Leave empty to use the moment you publish.');
@@ -2122,7 +2127,7 @@
       h('div', { class: 'cols' },
         h('div', {}, h('div', { class: 'panel' }, f.title, f.subtitle), h('div', { class: 'panel' }, bodyBox, wcBar)),
         h('div', {},
-          h('div', { class: 'panel' }, h('h3', { text: 'Publishing' }), field('Status', f.status, canPublish() ? '' : 'Writers save drafts. An editor will publish them.'), schedField, pubField, (partnerList().length || a.partner_label || a.partner_mode === 'main') ? field('Where it appears', f.where, 'Pick a partner to share this story with their embed, or to keep it out of the main website.') : null, tk.box, ft.box, br.box, f.breakingText),
+          h('div', { class: 'panel' }, h('h3', { text: 'Publishing' }), field('Format', f.format, 'A Spark is a quick read. It keeps its section, but has its own page and never becomes the featured or latest story.'), field('Status', f.status, canPublish() ? '' : 'Writers save drafts. An editor will publish them.'), schedField, pubField, (partnerList().length || a.partner_label || a.partner_mode === 'main') ? field('Where it appears', f.where, 'Pick a partner to share this story with their embed, or to keep it out of the main website.') : null, tk.box, ft.box, br.box, f.breakingText),
           h('div', { class: 'panel' }, h('h3', { text: 'Details' }), field('Section', f.category), catList, field('Author', f.author), av.box),
           h('div', { class: 'panel' }, h('h3', { text: 'Cover image' }), prev, field('Image address', f.image),
             h('div', { class: 'up' }, h('button', { class: 'btn', type: 'button', text: 'Upload image', onclick: function () { pickImage(function (u) { f.image.value = u; mark(); showCover(); }); } })),
@@ -2160,6 +2165,8 @@
       if (seoUsed || 'seo_title' in a) {
         d.seo_title = f.seoTitle.value.trim() || null; d.seo_description = f.seoDesc.value.trim() || null; d.seo_keywords = f.seoKw.value.trim() || null;
       }
+      if (f.format.value === 'quick' || 'article_format' in a) d.article_format = f.format.value;   /* column comes from supabase/sparks.sql */
+      if (f.format.value === 'quick') d.is_featured = false;
       var tr = {};
       Object.keys(trData).forEach(function (l) {
         var v = trData[l], o = { title: v.t.value.trim(), subtitle: v.s.value.trim(), content: v.c.value.trim() };

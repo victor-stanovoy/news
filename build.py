@@ -57,6 +57,10 @@ DEFAULT_CONFIG = {
     "base_url": "",                 # e.g. https://victor-stanovoy.github.io/news  (used for social tags)
     "breaking_max_age_days": 7,     # breaking banner hides after this many days (0 = never hide)
     "most_read_count": 5,
+    "quick_name": "Sparks",
+    # Impressum (legal notice, required for Austrian/German websites). Fill in site.json; empty lines are left out.
+    "impressum": {"owner": "", "legal_form": "", "address": "", "email": "", "phone": "", "uid": "", "register": "",
+                  "responsible": "", "purpose": "Independent news, analysis and features", "supervisory": "", "extra": ""},
     "home_category_sections": 6,    # how many category blocks on the homepage
     "nav_max": 8,                   # sections shown in the menu; the rest go under "More"
     "nav_order": [],                # optional: categories listed first in the menu
@@ -427,7 +431,8 @@ def fetch_db(cfg):
     rows, start, page = [], 0, 1000
     cols_nolabel = "id,slug,title,subtitle,content,content_type,category,image_url,cover_focus_x,cover_focus_y,additional_images,image_layout,reporter_video_url,status,taken_down,is_breaking,breaking_description,published_at,scheduled_publish_at,is_ai_translated,is_featured,views,is_live_update,live_update_label,live_updates,citations,series_id,series_order,translations,created_at,updated_at"        # never ask for created_by / updated_by: nothing public needs them
     # optional columns: partners.sql adds the first two, seo.sql the next three. Older databases work without them.
-    tiers = [cols_nolabel + ",partner_label,partner_mode,seo_title,seo_description,seo_keywords",
+    tiers = [cols_nolabel + ",partner_label,partner_mode,seo_title,seo_description,seo_keywords,article_format",
+             cols_nolabel + ",partner_label,partner_mode,seo_title,seo_description,seo_keywords",
              cols_nolabel + ",partner_label,partner_mode",
              cols_nolabel]
     cols = tiers[0]
@@ -731,6 +736,7 @@ def load_articles(cfg, now):
         a.breaking = truthy(g("is_breaking"))
         a.breaking_text = g("breaking_description") or title
         a.featured = truthy(g("is_featured"))
+        a.quick = g("article_format").lower() == "quick"      # a "Spark": a short read, kept off the featured and latest lists
         a.views = to_int(g("views"))
         a.is_live = truthy(g("is_live_update"))
         a.live_label = g("live_update_label") or "LIVE"
@@ -1298,15 +1304,30 @@ class Site:
         jump = "".join(f'<a href="#m{y}-{m}">{months[m-1][:3]} {y}</a>' for y, m in keys[:36])
         body = "".join(
             f'<h2 id="m{y}-{m}">{months[m-1]} {y}</h2><ul>' + "".join(
-                f'<li><time datetime="{a.date.isoformat()}">{esc(fmt_date(a.date))} &middot; {esc(a.category)}</time><a href="../a/{a.slug}.html">{esc(a.title)}</a></li>'
+                f'<li{" data-q=1" if a.quick else ""}><time datetime="{a.date.isoformat()}">{esc(fmt_date(a.date))} &middot; {esc(a.category)}{" &middot; " + esc(self.cfg.get("quick_name") or "Sparks") if a.quick else ""}</time><a href="../a/{a.slug}.html">{esc(a.title)}</a></li>'
                 for a in groups[(y, m)]) + "</ul>" for y, m in keys)
         n = sum(len(v) for v in groups.values())
         html_ = (f'<div class="wrap narrow archive"><h1>All articles</h1><p class="lead">Every story published on {esc(cfg["site_name"])}: {n} articles, newest first.</p>'
-                 f'<nav class="ajump" aria-label="Jump to a month">{jump}</nav>{body}</div>')
+                 f'<div class="afilter" role="group" aria-label="Show"><button type="button" data-f="" class="on">All</button><button type="button" data-f="a">Articles</button>'
+                 f'<button type="button" data-f="q">{esc(cfg.get("quick_name") or "Sparks")}</button></div>'
+                 f'<nav class="ajump" aria-label="Jump to a month">{jump}</nav><div id="alist">{body}</div></div>'
+                 '<script>document.querySelectorAll(".afilter button").forEach(function(b){b.onclick=function(){var f=b.dataset.f;'
+                 'document.querySelectorAll(".afilter button").forEach(function(x){x.classList.toggle("on",x===b)});'
+                 'document.querySelectorAll("#alist li").forEach(function(li){li.hidden=f==="q"?!li.dataset.q:f==="a"?!!li.dataset.q:false});'
+                 'document.querySelectorAll("#alist h2").forEach(function(h){var u=h.nextElementSibling;h.hidden=!u.querySelector("li:not([hidden])")})}})</script>')
         ld = {"@context": "https://schema.org", "@type": "CollectionPage", "name": f"All articles | {cfg['site_name']}",
               "url": f"{base}/archive/index.html" if base else None, "isPartOf": {"@id": f"{base}/#org"} if base else None}
         return self.page("All articles", html_, "../", desc=f"Every article published on {cfg['site_name']}, newest first: {n} stories on science, technology, society and culture.",
                          path="archive/index.html", ld={k: v for k, v in ld.items() if v})
+
+    def sparks_page(self):
+        cfg = self.cfg; qn = cfg.get("quick_name") or "Sparks"
+        items = [a for a in self.arts if a.quick and not a.is_embed]
+        grid = "".join(self.card(a, "../") for a in items) or '<p class="count">Nothing here yet.</p>'
+        body = (f'<div class="wrap"><h1 class="pagetitle">{esc(qn)}</h1>'
+                f'<p class="lead">Short reads: the news in a few minutes or less. Each one still sits in its own section.</p>'
+                f'<p class="count">{len(items)} short read{"s" if len(items) != 1 else ""}</p><div class="grid3">{grid}</div></div>')
+        return self.page(qn, body, "../", desc=f"{qn}: short reads from {cfg['site_name']}", path="sparks/index.html")
 
     def ai_files_on(self):
         seo = self.cfg["seo"]
@@ -1346,6 +1367,23 @@ class Site:
         o += ["", "## Latest articles", ""]
         o += [f"- [{a.title}]({base}/a/{a.slug}.html): {a.excerpt}" for a in [x for x in self.arts if x.slug not in skip and not x.is_embed][:40]]
         return "\n".join(o) + "\n"
+
+    def impressum_page(self):
+        cfg = self.cfg; im = cfg.get("impressum") or {}
+        rows = [("Media owner and publisher", im.get("owner")), ("Legal form", im.get("legal_form")), ("Address", im.get("address")),
+                ("Email", im.get("email")), ("Phone", im.get("phone")), ("VAT ID (UID)", im.get("uid")),
+                ("Commercial register", im.get("register")), ("Editor in chief / responsible for content", im.get("responsible")),
+                ("Supervisory authority", im.get("supervisory")), ("Basic editorial line (Grundlegende Richtung)", im.get("purpose"))]
+        dl = "".join(f'<dt>{esc(k)}</dt><dd>{esc(v).replace(chr(10), "<br>")}</dd>' for k, v in rows if v)
+        if im.get("email"):
+            dl = dl.replace(esc(im["email"]), f'<a href="mailto:{esc(im["email"])}">{esc(im["email"])}</a>', 1)
+        extra = f'<p>{esc(im["extra"]).replace(chr(10), "<br>")}</p>' if im.get("extra") else ""
+        body = (f'<div class="wrap narrow impressum"><h1>Impressum</h1><p class="lead">Legal notice according to § 5 E-Commerce Act (ECG), § 25 Media Act (MedienG) and § 14 Commercial Code (UGB).</p>'
+                f'<dl>{dl or "<dt>Details</dt><dd>Not yet filled in.</dd>"}</dl>{extra}'
+                f'<h2>Liability for content and links</h2><p>We take care to keep the content of this website correct and up to date, but cannot guarantee it. '
+                f'Links to external websites are checked when they are set; we have no influence on their content and are not responsible for it.</p>'
+                f'<h2>Copyright</h2><p>The content of this website is protected by copyright. Quoting with a link back to the original page is welcome; other use needs our permission.</p></div>')
+        return self.page("Impressum", body, "../", desc=f"Impressum and legal notice of {cfg['site_name']}", path="impressum/index.html")
 
     def privacy_page(self):
         cfg = self.cfg; locked = self.locked(); li = []
@@ -1460,7 +1498,7 @@ class Site:
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
         return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
-                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}about/index.html">About</a>{"" if self.embed else f' &middot; <a href="{root}archive/index.html">All articles</a>'} &middot; <a href="{root}privacy/index.html">Privacy</a>{"" if self.locked() else ' &middot; <a href="#" data-cookie-settings>Cookie settings</a>'}</p>'
+                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}about/index.html">About</a>{"" if self.embed else f' &middot; <a href="{root}archive/index.html">All articles</a>'} &middot; <a href="{root}privacy/index.html">Privacy</a> &middot; <a href="{root}impressum/index.html">Impressum</a>{"" if self.locked() else ' &middot; <a href="#" data-cookie-settings>Cookie settings</a>'}</p>'
                 f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
 
     def ticker_entries(self, root):
@@ -1585,6 +1623,8 @@ class Site:
             bits.append(f'<span class="cat">{esc(a.category)}</span>')
         bits.append(f'<time datetime="{a.date.isoformat()}">{fmt_date(a.date)}</time>')
         live = f'<span class="live">{esc(a.live_label)}</span>' if a.is_live else ""
+        if a.quick:
+            live += f'<span class="qtag">{esc(self.cfg.get("quick_name") or "Sparks")[:-1] if (self.cfg.get("quick_name") or "Sparks").endswith("s") else esc(self.cfg.get("quick_name") or "Spark")}</span>'
         return f'<p class="meta">{live}{" · ".join(bits)}</p>'
 
     def card(self, a, root, size="m"):
@@ -1604,9 +1644,11 @@ class Site:
         if not arts:
             return self.page("", '<div class="wrap empty"><h1>No articles yet</h1>'
                                   '<p>Add a CSV file to the <code>articles</code> folder and rebuild.</p></div>', root)
-        featured = [a for a in arts if a.featured]
-        hero = featured[0] if featured else arts[0]
-        rest = [a for a in arts if a is not hero]
+        main = [a for a in arts if not a.quick] or arts      # Sparks never lead or fill the main lists
+        sparks = [a for a in arts if a.quick and not a.is_embed]
+        featured = [a for a in main if a.featured]
+        hero = featured[0] if featured else main[0]
+        rest = [a for a in main if a is not hero]
         side, latest = rest[:4], rest[4:13]
 
         banner = ""
@@ -1626,11 +1668,11 @@ class Site:
                f'<div class="side">{"".join(self.row(a, root) for a in side)}</div></section>')
 
         cnt = "".join(f'<a href="c/{sl}.html">{esc(c["name"])}<b>{len(c["items"])}</b></a>' for sl, c in list(self.cats.items())[:10])
-        quick = sorted([a for a in rest if not a.is_embed and a.read_min <= 3], key=lambda a: (a.read_min, -a.date.timestamp()))[:4]
-        qk = "".join(f'<li><a href="{self.url(a, root)}">{esc(a.title)}</a><span>{a.read_min} min</span></li>' for a in quick)
+        qn = esc(cfg.get("quick_name") or "Sparks")
+        qk = "".join(f'<li><a href="{self.url(a, root)}">{esc(a.title)}</a><span>{a.read_min} min</span></li>' for a in sparks[:4])
         widgets = ('<section class="wrap widgets" aria-label="Quick access">'
                    + (f'<div class="wg"><h2>Topics</h2><div class="wtopics">{cnt}</div></div>' if cnt else "")
-                   + (f'<div class="wg"><h2>Quick reads</h2><ul class="wlist">{qk}</ul></div>' if qk else "")
+                   + (f'<div class="wg"><h2>{qn}</h2><ul class="wlist">{qk}</ul><p class="wmore"><a href="sparks/index.html">All {qn.lower()} &rsaquo;</a></p></div>' if qk else "")
                    + '<div class="wg" id="wsaved" hidden><h2>Saved for you</h2><ul class="wlist" id="wsaved-list"></ul></div></section>')
         mr_pool = sorted(arts, key=lambda a: (-a.views, -a.date.timestamp()))[:cfg["most_read_count"]]
         if all(a.views == 0 for a in mr_pool):
@@ -1654,7 +1696,7 @@ class Site:
         shown = {hero.slug} | {a.slug for a in side} | {a.slug for a in latest} | ({spot.slug} if spot else set())
         blocks = ""
         for slug, c in list(self.cats.items())[:cfg["home_category_sections"]]:
-            items = [a for a in c["items"] if a.slug not in shown][:4] or c["items"][:4]
+            items = [a for a in c["items"] if a.slug not in shown and not a.quick][:4] or [a for a in c["items"] if not a.quick][:4] or c["items"][:4]
             blocks += (f'<section class="catband"><div class="wrap catblock"><h2 class="sec"><a href="c/{slug}.html">{esc(c["name"])} &rsaquo;</a></h2>'
                        f'<div class="grid4">{"".join(self.card(a, root, "s") for a in items)}</div></div></section>')
         return self.page("", f'<h1 class="sr">{esc(cfg["site_name"])} – {esc(cfg["tagline"])}</h1>' + banner + top + widgets + lat + spotlight + blocks, root,
@@ -1902,7 +1944,7 @@ class Site:
             if mod: x += f"<lastmod>{mod.strftime('%Y-%m-%d')}</lastmod>"
             if img and str(img).startswith("http"): x += f"<image:image><image:loc>{esc(img)}</image:loc></image:image>"
             return x + "</url>"
-        rows = [u(f"{base}/"), u(f"{base}/about/index.html"), u(f"{base}/archive/index.html")] + [u(f"{base}/c/{s}.html") for s in self.cats]
+        rows = [u(f"{base}/"), u(f"{base}/about/index.html"), u(f"{base}/archive/index.html"), u(f"{base}/impressum/index.html")] + ([u(f"{base}/sparks/index.html")] if any(a.quick for a in self.arts) else []) + [u(f"{base}/c/{s}.html") for s in self.cats]
         for a in self.arts:
             if a.is_embed or a.slug in skip: continue
             mod = a.updated or a.date
@@ -2096,12 +2138,17 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     w("search.html", site.search_page())
     (out / "privacy").mkdir()
     w("privacy/index.html", site.privacy_page())
+    (out / "impressum").mkdir()
+    w("impressum/index.html", site.impressum_page())
     (out / "about").mkdir()
     w("about/index.html", site.about_page())
     _tr_save()
     if not site.embed:
         (out / "archive").mkdir()
         w("archive/index.html", site.archive_page(redirects))
+        if any(a.quick for a in site.arts):
+            (out / "sparks").mkdir()
+            w("sparks/index.html", site.sparks_page())
         if not site.locked() and cfg["seo"].get("indexing") and not cfg["seo"].get("block_ai_crawlers"):
             lt = site.llms_txt(redirects)
             if lt: (out / "llms.txt").write_text(lt, encoding="utf-8")
