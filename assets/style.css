@@ -742,3 +742,6 @@ time,.ltime,.airtime,.ctime{font-variant-numeric:tabular-nums}
 }
 .trnote{font-size:13px;color:var(--muted);border-inline-start:3px solid var(--spark);padding:4px 10px;margin:0 0 18px}
 [data-tr][hidden],[data-orig][hidden]{display:none!important}
+.savebtn{font:inherit;cursor:pointer}.savebtn.done{color:var(--spark)}
+.savedlist{list-style:none;margin:8px 0;padding:0}.savedlist li{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line,#8884)}
+.unsave{background:none;border:0;cursor:pointer;color:var(--muted);font:inherit}

@@ -283,4 +283,33 @@ document.addEventListener('visibilitychange', function () { document.documentEle
     }, { passive: true });
     nav.addEventListener('focusin', function () { nav.classList.remove('tuck'); });
   }
+  /* saved articles: a list kept in this browser (needs the Preferences choice in the cookie banner, like other settings) */
+  var SK = 'spark-saved';
+  function saved() { try { var v = JSON.parse(localStorage.getItem(SK) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+  function keep(v) { try { localStorage.setItem(SK, JSON.stringify(v.slice(0, 60))); } catch (e) {} }
+  var sb = document.querySelector('.savebtn');
+  if (sb) {
+    var me = location.pathname, has = function () { return saved().some(function (x) { return x.u === me; }); };
+    var paint = function () { var on = has(); sb.setAttribute('aria-pressed', on ? 'true' : 'false'); sb.textContent = on ? 'Saved ✓' : 'Save'; sb.classList.toggle('done', on); };
+    sb.addEventListener('click', function () {
+      var v = saved(), h = document.querySelector('h1');
+      if (has()) v = v.filter(function (x) { return x.u !== me; }); else v.unshift({ u: me, t: (h ? h.textContent : document.title).trim() });
+      keep(v); paint();
+    });
+    paint();
+  }
+  var sl = document.getElementById('saved-list');
+  if (sl) {
+    var draw = function () {
+      var v = saved(); sl.textContent = '';
+      v.forEach(function (x) {
+        var li = document.createElement('li'), a = document.createElement('a'), r = document.createElement('button');
+        a.href = x.u; a.textContent = x.t; r.type = 'button'; r.className = 'unsave'; r.textContent = '✕'; r.setAttribute('aria-label', 'Remove');
+        r.addEventListener('click', function () { keep(saved().filter(function (y) { return y.u !== x.u; })); draw(); });
+        li.appendChild(a); li.appendChild(r); sl.appendChild(li);
+      });
+      var n = document.getElementById('saved-none'); if (n) n.hidden = v.length > 0;
+    };
+    draw();
+  }
 })();

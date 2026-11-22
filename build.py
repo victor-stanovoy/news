@@ -1191,6 +1191,8 @@ class Site:
             return "".join(f'<label class="opt"><input type="radio" name="{name}" value="{v}"><span>{l}</span></label>' for v, l in opts)
         body = ('<div class="wrap prefspage"><h1>Settings</h1><p class="lead">These choices are saved in this browser only. We do not collect them.</p>'
                 '<form id="prefs" novalidate>'
+                '<fieldset><legend>Saved articles</legend><p class="small">Articles you saved with the Save button, kept on this device only.</p>'
+                '<ul id="saved-list" class="savedlist"></ul><p id="saved-none" class="small">Nothing saved yet.</p></fieldset>'
                 '<fieldset><legend>Browser tab ticker</legend>'
                 '<p class="small">When you switch to another tab or window, the title of this tab can scroll the latest headlines.</p>'
                 '<label class="switch"><input type="checkbox" name="tab"><span>Show headlines in the tab title while I am away</span></label>'
@@ -1782,7 +1784,11 @@ class Site:
                          f'<a href="https://www.facebook.com/sharer/sharer.php?u={share_url}" target="_blank" rel="noopener">Facebook</a>'
                          f'<a href="https://wa.me/?text={t}%20{share_url}" target="_blank" rel="noopener">WhatsApp</a>'
                          f'<a href="mailto:?subject={t}&amp;body={share_url}">Email</a>'
-                         f'<button type="button" class="copylink" data-copy="{share_url}">Copy link</button></div>')
+                         f'<button type="button" class="copylink" data-copy="{share_url}">Copy link</button>'
+                         f'<button type="button" class="savebtn" aria-pressed="false">Save</button></div>')
+
+        if not share_url:
+            parts.append('<div class="share"><button type="button" class="savebtn" aria-pressed="false">Save</button></div>')
 
         if fullscreen:
             # the whole page becomes the HTML article: one slim bar to go back, then the content fills the window

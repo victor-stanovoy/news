@@ -405,3 +405,6 @@ Everything is flat colour: no gradients anywhere (the old ones were replaced). N
 
 ## Translated About and Privacy pages
 When the site is built, the About and Privacy pages are machine-translated into Arabic, Chinese, French, Russian, Spanish and German and stored hidden in the page. Visitors who pick one of those languages see the translated copy with a "Read the original" link. Translations are cached in `data/translations.json` (kept between builds by the workflow's cache step), so only changed text is translated again. Set `SPARK_NO_TRANSLATE=1` to skip this.
+
+## Saved articles
+Every article has a Save button next to Share. Saved articles are listed in Settings, under "Saved articles", and can be removed there. They are stored only in the reader's browser (when the Preferences choice in the cookie banner allows it).
