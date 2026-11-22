@@ -1625,6 +1625,13 @@ class Site:
                f'<div class="ct"><h2>{esc(hero.title)}</h2><p class="ex">{esc(hero.excerpt)}</p>{self.meta(hero)}</div></a></article>'
                f'<div class="side">{"".join(self.row(a, root) for a in side)}</div></section>')
 
+        cnt = "".join(f'<a href="c/{sl}.html">{esc(c["name"])}<b>{len(c["items"])}</b></a>' for sl, c in list(self.cats.items())[:10])
+        quick = sorted([a for a in rest if not a.is_embed and a.read_min <= 3], key=lambda a: (a.read_min, -a.date.timestamp()))[:4]
+        qk = "".join(f'<li><a href="{self.url(a, root)}">{esc(a.title)}</a><span>{a.read_min} min</span></li>' for a in quick)
+        widgets = ('<section class="wrap widgets" aria-label="Quick access">'
+                   + (f'<div class="wg"><h2>Topics</h2><div class="wtopics">{cnt}</div></div>' if cnt else "")
+                   + (f'<div class="wg"><h2>Quick reads</h2><ul class="wlist">{qk}</ul></div>' if qk else "")
+                   + '<div class="wg" id="wsaved" hidden><h2>Saved for you</h2><ul class="wlist" id="wsaved-list"></ul></div></section>')
         mr_pool = sorted(arts, key=lambda a: (-a.views, -a.date.timestamp()))[:cfg["most_read_count"]]
         if all(a.views == 0 for a in mr_pool):
             mr_pool = arts[:cfg["most_read_count"]]
@@ -1650,7 +1657,7 @@ class Site:
             items = [a for a in c["items"] if a.slug not in shown][:4] or c["items"][:4]
             blocks += (f'<section class="catband"><div class="wrap catblock"><h2 class="sec"><a href="c/{slug}.html">{esc(c["name"])} &rsaquo;</a></h2>'
                        f'<div class="grid4">{"".join(self.card(a, root, "s") for a in items)}</div></div></section>')
-        return self.page("", f'<h1 class="sr">{esc(cfg["site_name"])} – {esc(cfg["tagline"])}</h1>' + banner + top + chipbar + lat + spotlight + blocks, root,
+        return self.page("", f'<h1 class="sr">{esc(cfg["site_name"])} – {esc(cfg["tagline"])}</h1>' + banner + top + widgets + lat + spotlight + blocks, root,
                          image=self.img(hero.image_raw, root), path="index.html")
 
     def category(self, slug, c):

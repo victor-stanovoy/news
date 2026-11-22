@@ -312,4 +312,6 @@ document.addEventListener('visibilitychange', function () { document.documentEle
     };
     draw();
   }
+  var ws = document.getElementById('wsaved-list');
+  if (ws) { var sv = saved().slice(0, 4); if (sv.length) { sv.forEach(function (x) { var li = document.createElement('li'), a = document.createElement('a'); a.href = x.u; a.textContent = x.t; li.appendChild(a); ws.appendChild(li); }); document.getElementById('wsaved').hidden = false; } }
 })();

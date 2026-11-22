@@ -745,3 +745,25 @@ time,.ltime,.airtime,.ctime{font-variant-numeric:tabular-nums}
 .savebtn{font:inherit;cursor:pointer}.savebtn.done{color:var(--spark)}
 .savedlist{list-style:none;margin:8px 0;padding:0}.savedlist li{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line,#8884)}
 .unsave{background:none;border:0;cursor:pointer;color:var(--muted);font:inherit}
+
+/* ---- home: the lead story shows the whole picture, text sits below it ---- */
+.hero a{color:var(--ink);background:none;overflow:visible}
+.hero .thumb{aspect-ratio:auto;background:var(--soft);display:flex;justify-content:center}
+.hero .thumb img{width:100%;height:auto;max-height:620px;object-fit:contain;transform:none!important}
+.hero .thumb .ph{aspect-ratio:16/9;height:auto}
+.hero .ct,.hero .ct:hover{position:static;background:none;padding:18px 0 0;border-top:0;color:var(--ink)}
+.hero .ct h2{color:var(--ink);font-size:clamp(28px,3.6vw,44px);line-height:1.06}
+.hero .ct .ex{color:var(--text2);display:block;-webkit-line-clamp:unset;overflow:visible;margin:10px 0 12px;font-size:18px}
+.hero .ct .meta,.hero .ct .meta *{color:var(--muted)}.hero .ct .meta .cat{color:var(--accent)}
+.hero a:hover h2{color:var(--accent);text-decoration:none}
+@media (max-width:560px){.hero .ct{padding:14px 0 0}}
+/* ---- home: widgets ---- */
+.widgets{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;padding-top:4px;padding-bottom:24px}
+.wg{background:var(--soft);border-top:3px solid var(--spark);padding:14px 16px}
+.wg h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin:0 0 10px;color:var(--muted)}
+.wtopics{display:flex;flex-wrap:wrap;gap:6px}
+.wtopics a{background:var(--bg);padding:5px 10px;font-size:14px;text-decoration:none;color:var(--ink);display:inline-flex;gap:6px;align-items:baseline}
+.wtopics a b{font-weight:600;font-size:12px;color:var(--muted)}.wtopics a:hover{background:var(--spark);color:#fff}.wtopics a:hover b{color:#fff}
+.wlist{list-style:none;margin:0;padding:0}.wlist li{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line,#8883);font-size:15px;line-height:1.3}
+.wlist li:last-child{border-bottom:0}.wlist a{color:var(--ink);text-decoration:none}.wlist a:hover{color:var(--accent)}.wlist span{color:var(--muted);font-size:13px;white-space:nowrap}
+.hero .thumb:empty{display:none}
