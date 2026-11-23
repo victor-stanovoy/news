@@ -7,7 +7,7 @@
 
   function call(body) {
     return fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: conf.key }, body: JSON.stringify(body) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok && !j.error) j = { error: r.status === 401 || r.status === 404 ? 'The newsletter is not available right now. Please try again later.' : 'Something went wrong. Please try again.' }; return { ok: r.ok, j: j }; }); })
       .catch(function () { return { ok: false, j: { error: 'No connection. Please try again.' } }; });
   }
 

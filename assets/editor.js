@@ -1502,6 +1502,7 @@
       return r.json().catch(function () { return {}; }).then(function (j) {
         j.status = r.status;
         if (r.status === 404 && !j.error) j.error = 'The "' + name + '" function is not deployed yet. See the README.';
+        if (r.status === 401 && /jwt/i.test(String(j.message || j.msg || j.error || ''))) j.error = 'Supabase turned the call away before the "' + name + '" function ran. Open Supabase > Edge Functions > ' + name + ' > Details and switch "Verify JWT" OFF, then try again.';
         return j;
       });
     }).catch(function () { return { error: 'No connection to the function. Check your internet and the function setup.' }; });
@@ -1815,8 +1816,8 @@
             field('Default share picture (https address)', bind(V.seo, 'default_image', 'text', { maxlength: 300, placeholder: 'https://…/share.png' })),
             tick(V.seo, 'news_sitemap', 'Write a Google News sitemap (articles of the last 2 days)'),
             field('Default search description', bind(V.seo, 'default_description', 'text', { maxlength: 200, placeholder: 'Used when a page has no summary' })),
-            field('Site keywords', bind(V.seo, 'keywords', 'text', { maxlength: 600, placeholder: 'student journalism, Vienna, international school news' }),
-              'Separate with commas. Added to every page (meta keywords and structured data). Each article adds its own keywords and its section name. Google ignores the keywords tag itself, but Bing and others read it, and the structured data helps everywhere.'),
+            field('Site keywords', (function () { var t = h('textarea', { rows: 6, maxlength: 15000, placeholder: 'student journalism, Vienna, international school news, ...', oninput: function () { V.seo.keywords = t.value; mark(); } }); t.value = V.seo.keywords || ''; return t; })(),
+              'Add as many as you like (hundreds are fine), separated by commas or one per line. Added to every page (meta keywords and structured data). Each article adds its own keywords and its section name. Google ignores the keywords tag itself, but Bing and others read it, and the structured data helps everywhere.'),
             h('div', { class: 'row2' }, field('Publisher logo (https address)', bind(V.seo, 'logo', 'text', { maxlength: 300, placeholder: 'empty = the SparkNews logo' })),
               field('Language / region', bind(V.seo, 'locale', 'text', { maxlength: 10, placeholder: 'en_GB or de_AT' }))),
             h('div', { class: 'field' }, h('label', { text: 'Official profiles (Instagram, LinkedIn, X, ...)' }),
@@ -2062,7 +2063,7 @@
       input.addEventListener('input', u); u(); return c; }
     f.seoTitle = h('input', { type: 'text', value: a.seo_title || '', maxlength: 70, placeholder: 'Empty = the headline', oninput: mark });
     f.seoDesc = h('textarea', { rows: '3', maxlength: 300, placeholder: 'Empty = the standfirst or the first lines of the article', oninput: mark }); f.seoDesc.value = a.seo_description || '';
-    f.seoKw = h('input', { type: 'text', value: a.seo_keywords || '', maxlength: 300, placeholder: 'e.g. climate march, Vienna, student council', oninput: mark });
+    f.seoKw = h('input', { type: 'text', value: a.seo_keywords || '', maxlength: 2000, placeholder: 'e.g. climate march, Vienna, student council', oninput: mark });
     var seoPanel = h('div', { class: 'panel' }, h('h3', { text: 'Search engines (SEO)' }),
       field('Search title', f.seoTitle), counter(f.seoTitle, 60),
       field('Search description', f.seoDesc), counter(f.seoDesc, 160),

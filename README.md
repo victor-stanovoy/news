@@ -417,3 +417,8 @@ In the editor, the Publishing box has a **Format** choice: Article or **Spark** 
 
 ## Series (playlists)
 Open the editor's **Series** tab to create series: give it a title and description, add articles from a list, and put them in reading order with the arrows. In an article's own editor page, the **Series** box lets you pick a series and a part number. On the website each series gets a playlist page at `/series/<name>.html` (numbered parts, total reading time, "Start with part 1"), an overview at `/series/`, a "Series" widget on the home page, and each article in a series shows its place with Previous / Next buttons. Run `supabase/series.sql` once (it is already applied to the live project). Series that already existed on articles keep working: use "Name it" in the Series tab to give them a title.
+
+## Newsletter troubleshooting
+If sign-up or sending does nothing, the `newsletter` function almost always has **Verify JWT** switched on. In Supabase open Edge Functions > newsletter > Details and switch **Verify JWT** off (the function checks who is calling itself). The editor now says this when it sees that error. Also check, in the editor: Settings > Newsletter > **Show the sign-up box on the website** is ticked and saved, and Newsletter > Design has a sender name, sender email (verified with your email service) and your postal address.
+
+Site keywords (Settings > Search engines) accept hundreds of keywords, separated by commas or one per line.

@@ -556,7 +556,7 @@ def clean_settings(d):
         for k, n in (("title_suffix", 60), ("default_image", 300), ("twitter_site", 40), ("default_description", 200), ("home_title", 90), ("about", 700), ("google_verification", 120), ("bing_verification", 120)):
             if isinstance(s.get(k), str): o[k] = _str(s[k], n)
         if isinstance(s.get("keywords"), str):
-            o["keywords"] = ", ".join(clean_keywords(s["keywords"], 30))[:600]
+            o["keywords"] = ", ".join(clean_keywords(s["keywords"], 500))[:15000]
         if isinstance(s.get("logo"), str):
             o["logo"] = s["logo"].strip()[:300] if re.match(r"^https://[^\s\"'<>]+$", s["logo"].strip()) else ""
         if isinstance(s.get("same_as"), list):
@@ -765,7 +765,7 @@ def load_articles(cfg, now):
                     a.translations[lang.lower()] = v
         a.seo_title = g("seo_title")[:70]
         a.seo_description = g("seo_description")[:300]
-        a.seo_keywords = clean_keywords(g("seo_keywords"), 15)
+        a.seo_keywords = clean_keywords(g("seo_keywords"), 60)
         a.label = g("partner_label").lower()
         a.pmode = g("partner_mode").lower()       # redirect | hide | show (empty = the partner's default)
         a.series_id = g("series_id")
@@ -1164,7 +1164,7 @@ class Site:
             og += f'<meta property="og:image" content="{esc(dimg)}"><meta name="twitter:card" content="summary_large_image">'
         og += f'<meta name="twitter:title" content="{esc((shown or home_t)[:70])}"><meta name="twitter:description" content="{esc(desc[:200])}">' + meta
         og += f'<link rel="alternate" type="application/rss+xml" title="{esc(cfg["site_name"])}" href="{root}feed.xml">'
-        kws = clean_keywords(list(keywords or []) + clean_keywords(seo.get("keywords", ""), 30), 25)
+        kws = clean_keywords(list(keywords or []) + clean_keywords(seo.get("keywords", ""), 500), 120)
         if kws and seo.get("indexing"):
             og += f'<meta name="keywords" content="{esc(", ".join(kws))}">'
         loc = seo.get("locale") or {"en": "en_GB", "de": "de_AT"}.get(cfg["language"][:2], "")
@@ -1616,7 +1616,7 @@ class Site:
                         "contactPoint": {"@type": "ContactPoint", "contactType": "press", "email": "press@sparknews.cc"} if base else None,
                         "logo": (self.cfg["seo"].get("logo") or f"{base}/assets/logo.png") if base else None, "description": self.cfg["seo"].get("about") or self.cfg["tagline"],
                         "sameAs": self.cfg["seo"].get("same_as") or None,
-                        "keywords": ", ".join(clean_keywords(self.cfg["seo"].get("keywords", ""), 30)) or None}
+                        "keywords": ", ".join(clean_keywords(self.cfg["seo"].get("keywords", ""), 500)) or None}
             kw["ld"] = {k: v for k, v in kw["ld"].items() if v}
             if base:
                 kw["ld"] = [kw["ld"], {"@context": "https://schema.org", "@type": "WebSite", "name": self.cfg["site_name"], "url": base + "/",
@@ -1923,7 +1923,7 @@ class Site:
             art += (f'<section class="wrap rel"><h2 class="sec">More in {esc(a.category)}</h2>'
                     f'<div class="grid3">{"".join(self.card(x, root) for x in related)}</div></section>')
         desc = (strip_tags(subtitle or body_html)[:160] if tr else (a.seo_description or a.excerpt))
-        kws = clean_keywords(list(a.seo_keywords) + [a.category], 15)
+        kws = clean_keywords(list(a.seo_keywords) + [a.category], 60)
         alts = [("x-default", f"a/{a.slug}.html")] + [(l, f"a/{a.slug}.{l}.html") for l in a.translations] if a.translations else None
         base = self.cfg["base_url"].rstrip("/")
         ld = {"@context": "https://schema.org", "@type": "NewsArticle", "headline": title[:110], "datePublished": a.date.isoformat(),
@@ -1937,7 +1937,7 @@ class Site:
         ld["inLanguage"] = lang or self.cfg["language"]
         ld["isAccessibleForFree"] = True
         ld["wordCount"] = a.words
-        ld["keywords"] = ", ".join(clean_keywords(kws + clean_keywords(self.cfg["seo"].get("keywords", ""), 30), 25))
+        ld["keywords"] = ", ".join(clean_keywords(kws + clean_keywords(self.cfg["seo"].get("keywords", ""), 500), 150))
         ld["articleSection"] = a.category
         if src and src.startswith("http"): ld["image"] = [src]
         if "image" not in ld and base:      # Google wants an image on every NewsArticle
