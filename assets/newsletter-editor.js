@@ -38,6 +38,14 @@
     }
     function mark() { ctx.setDirty(true); refreshPreview(); }
     function html() { return SE.render(cur.state, design, opts()); }
+    function copyText(text, okMsg) {
+      if (!text) return toast('There is nothing to copy yet.', true);
+      var done = function () { toast(okMsg); }, fallback = function () {
+        var t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed;left:-9999px'; document.body.appendChild(t); t.select();
+        var ok = false; try { ok = document.execCommand('copy'); } catch (e) {} document.body.removeChild(t); ok ? done() : toast('Copying was blocked by the browser. Use the download button instead.', true);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+    }
     function loadDesign() {
       return sb.from('site_settings').select('data').eq('id', 1).maybeSingle().then(function (r) {
         var n = r.data && r.data.data && r.data.data.newsletter;
@@ -164,9 +172,10 @@
           else { msg.className = 'hint err'; msg.textContent = j.error || 'The test email could not be sent.'; }
         });
       } });
+      var copyHtml = h('button', { class: 'btn', type: 'button', text: 'Copy HTML', title: 'Copy the finished email code', onclick: function () { copyText(html(), 'Email HTML copied (' + Math.round(html().length / 1024) + ' KB)'); } });
       var send = h('button', { class: 'btn primary', type: 'button', disabled: ro, text: ro ? 'Already sent' : 'Send to subscribers…', onclick: sendDialog });
       form.push(h('h3', { text: '4. Send' }), h('div', { class: 'sendrow' }, field('Test address', testTo), test), msg,
-        h('div', { class: 'btnrow' }, save, send, count));
+        h('div', { class: 'btnrow' }, save, copyHtml, send, count));
       if (ro) form.unshift(h('div', { class: 'msg info', text: 'This newsletter was sent' + (cur.sentAt ? ' on ' + ctx.fmtDate(cur.sentAt) : '') + '. It is shown read-only. Use "Duplicate" in the Sent list to reuse it.' }));
 
       var frame = iframe(), device = 'desktop';
@@ -271,6 +280,10 @@
       } });
       body.replaceChildren(h('div', { class: 'subs' },
         h('div', { class: 'subhead' }, h('h3', { text: 'Subscribers' }), h('span', { class: 'sp' }),
+          h('button', { class: 'btn', type: 'button', text: 'Copy confirmed emails', onclick: function () {
+            var l = subs.filter(function (x) { return x.status === 'confirmed'; }).map(function (x) { return x.email; }); copyText(l.join(', '), l.length + ' confirmed emails copied'); } }),
+          h('button', { class: 'btn', type: 'button', text: 'Copy all emails', onclick: function () {
+            var l = subs.map(function (x) { return x.email; }); copyText(l.join(', '), l.length + ' emails copied (all statuses)'); } }),
           h('button', { class: 'btn', type: 'button', text: 'Download list (CSV)', onclick: function () {
             download('subscribers.csv', 'email,name,status,joined\n' + subs.map(function (s) { return [s.email, s.name || '', s.status, (s.created_at || '').slice(0, 10)].map(function (x) { return '"' + String(x).replace(/"/g, '""') + '"'; }).join(','); }).join('\n'), 'text/csv'); } })),
         chips, search, list,
