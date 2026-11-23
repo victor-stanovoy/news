@@ -319,3 +319,7 @@ body.focusing{overflow:hidden}
 .colbtn{font:inherit;background:none;border:0;cursor:pointer;padding:0 4px;color:inherit}
 .panel.collapsed>*:not(h3){display:none}.panel.collapsed .studiogrid{display:none}
 @media (max-width:820px){.studiobar{top:107px}.secnav{top:210px;overflow-x:auto;flex-wrap:nowrap}.secnav a{white-space:nowrap}}
+.series .cols2{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:16px;align-items:start}
+@media(max-width:760px){.series .cols2{grid-template-columns:1fr}}
+.splist{list-style:none;margin:10px 0;padding:0}.splist li{display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--line,#8883)}
+.splist li.on{background:var(--soft)}.splist .stt{flex:1}.splist .sn{min-width:26px;font-weight:700;color:var(--muted)}.splist .lnk{flex:1;text-align:start}

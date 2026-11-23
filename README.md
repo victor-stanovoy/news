@@ -414,3 +414,6 @@ In the editor, the Publishing box has a **Format** choice: Article or **Spark** 
 
 ## Impressum
 `/impressum/` is the legal notice (Austria: ECG, MedienG, UGB), linked in the footer. Fill in your details in `site.json` under `"impressum"` (`owner`, `legal_form`, `address`, `email`, `phone`, `uid`, `register`, `responsible`, `supervisory`, `purpose`, `extra`). Empty lines are left out.
+
+## Series (playlists)
+Open the editor's **Series** tab to create series: give it a title and description, add articles from a list, and put them in reading order with the arrows. In an article's own editor page, the **Series** box lets you pick a series and a part number. On the website each series gets a playlist page at `/series/<name>.html` (numbered parts, total reading time, "Start with part 1"), an overview at `/series/`, a "Series" widget on the home page, and each article in a series shows its place with Previous / Next buttons. Run `supabase/series.sql` once (it is already applied to the live project). Series that already existed on articles keep working: use "Name it" in the Series tab to give them a title.

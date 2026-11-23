@@ -412,7 +412,7 @@
       h('button', { class: 'lnk', type: 'button', text: 'Password', onclick: function () { guard(function () { renderPassword(false); }); } }),
       h('button', { class: 'lnk', type: 'button', text: 'Sign out', onclick: function () { guard(signOut); } }));
 
-    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['schedule', 'Schedule', '#/schedule'], ['newsletter', 'Newsletter', '#/newsletter'], ['polls', 'Polls', '#/polls']] : [], me.role === 'admin' ? [['badges', 'Badges', '#/badges'], ['settings', 'Settings', '#/settings']] : []);
+    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['schedule', 'Schedule', '#/schedule'], ['newsletter', 'Newsletter', '#/newsletter'], ['polls', 'Polls', '#/polls'], ['series', 'Series', '#/series']] : [], me.role === 'admin' ? [['badges', 'Badges', '#/badges'], ['settings', 'Settings', '#/settings']] : []);
     tabsEl = h('nav', { class: 'tabs', 'aria-label': 'Workspaces' }, windows.map(function (w) {
       return h('button', { class: 'tab', type: 'button', 'data-v': w[0], onclick: function () { guard(function () { if (location.hash === w[2] || (w[0] === 'articles' && !location.hash)) route(); else location.hash = w[2]; }); } },
         w[1], w[0] === 'radio' || w[0] === 'tv' ? h('i', { class: 'dot', title: 'On air' }) : null);
@@ -572,6 +572,17 @@
       Promise.all([loadScript('../assets/vendor/qrcode.js'), loadScript('../assets/badges-editor.js?v=' + ((cfg.ver || {}).badges || ''))]).then(function () {
         if (view !== 'badges') return;
         stage.replaceChildren(window.SparkBadges.mount({ h: h, field: field, check: check, toast: toast, sb: sb, errText: errText, upload: upload, site: cfg.site }));
+      }).catch(function (e) { stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'msg err', text: errText(e) }))); });
+      return;
+    }
+    if (location.hash === '#/series') {
+      if (!canPublish()) { location.hash = ''; return; }
+      if (dashCleanup) { dashCleanup(); dashCleanup = null; }
+      current = null; dirty = false; view = 'series';
+      stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'empty', text: 'Loading…' }))); paintTabs();
+      loadScript('../assets/series-editor.js?v=' + ((cfg.ver || {}).series || '')).then(function () {
+        if (view !== 'series') return;
+        stage.replaceChildren(window.SparkSeries.mount({ h: h, field: field, toast: toast, sb: sb, errText: errText }));
       }).catch(function (e) { stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'msg err', text: errText(e) }))); });
       return;
     }
@@ -2056,7 +2067,16 @@
       field('Search title', f.seoTitle), counter(f.seoTitle, 60),
       field('Search description', f.seoDesc), counter(f.seoDesc, 160),
       field('Keywords', f.seoKw), h('small', { class: 'hint', text: 'Separate with commas. The section name is added automatically.' }));
-    f.seriesId = h('input', { type: 'text', value: a.series_id || '', oninput: mark }); f.seriesOrder = h('input', { type: 'number', value: a.series_order == null ? '' : a.series_order, oninput: mark });
+    f.seriesId = h('select', { onchange: mark }, h('option', { value: '', text: 'Not in a series' }));
+    if (a.series_id) f.seriesId.appendChild(h('option', { value: a.series_id, text: a.series_id }));
+    f.seriesId.value = a.series_id || '';
+    sb.from('article_series').select('slug,title').order('position').then(function (r) {      /* series.sql; without it the box keeps the current value only */
+      if (r.error || !r.data) return; var cur = f.seriesId.value; f.seriesId.replaceChildren(h('option', { value: '', text: 'Not in a series' }));
+      var seen = {}; r.data.forEach(function (s) { seen[s.slug] = 1; f.seriesId.appendChild(h('option', { value: s.slug, text: s.title })); });
+      if (cur && !seen[cur]) f.seriesId.appendChild(h('option', { value: cur, text: cur }));
+      f.seriesId.value = cur;
+    });
+    f.seriesOrder = h('input', { type: 'number', value: a.series_order == null ? '' : a.series_order, oninput: mark });
     var aiT = check('Translations were made automatically', a.is_ai_translated, mark); f.aiTr = aiT.input;
     f.where = whereSelect(a, mark);
 
@@ -2136,7 +2156,7 @@
             field('Article type', f.contentType), field('Extra images', f.extra),
             h('div', { class: 'up', style: 'margin:-6px 0 12px' }, h('button', { class: 'btn', type: 'button', text: 'Upload & add', onclick: function () { pickImage(function (u) { f.extra.value = (f.extra.value.trim() ? f.extra.value.trim() + '\n' : '') + u; mark(); }); } })),
             field('Extra images layout', f.layout), field('Video', f.video), field('Sources & credits', f.citations),
-            h('div', { class: 'row2' }, field('Series ID', f.seriesId), field('Series order', f.seriesOrder)), live.box, liveBox)),
+            h('div', { class: 'row2' }, field('Series', f.seriesId), field('Part number', f.seriesOrder)), live.box, liveBox)),
           seoPanel,
           h('div', { class: 'panel' }, h('h3', { text: 'Translations' }), h('p', { class: 'hint', text: 'Add a language, then press "Translate for me": it translates the headline, the summary and the whole article with free services (no account needed; if the first is unavailable it uses a second one with a small daily limit). Names you list below stay as they are. It is good enough to read but not perfect, so have someone check it before you publish.' }), field('This article is written in', f.srcLang), field('Keep these names untranslated', keepIn, 'The author and the site name are always kept.'), aiT.box, trBox, trSel, h('div', { class: 'btnrow' }, allBtn)),
           delBtn ? h('div', { class: 'panel' }, delBtn) : null)));

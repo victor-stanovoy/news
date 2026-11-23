@@ -462,6 +462,17 @@ def fetch_db(cfg):
     return rows, set(map(str, ids)) | {str(r.get("id")) for r in rows}
 
 
+SERIES_META = {}      # slug -> {"title", "description"}, from the article_series table (series.sql); empty if not set up
+
+
+def fetch_series(cfg):
+    url, key = db_settings(cfg)
+    if not url or not key:
+        return {}
+    rows = db_get(url, key, "/rest/v1/article_series?select=slug,title,description,position&order=position,created_at", optional=True) or []
+    return {r["slug"]: {"title": r.get("title") or r["slug"], "description": r.get("description") or ""} for r in rows if r.get("slug")}
+
+
 def normalize_db_row(r):
     """Make a database row look like a CSV row, so one code path builds articles from both."""
     out = {}
@@ -1077,6 +1088,19 @@ class Site:
         self.cats = dict(sorted(cats.items(), key=lambda kv: (
             order.index(kv[0]) if kv[0] in order else 999, -len(kv[1]["items"]), kv[1]["name"])))
 
+    def series_map(self):
+        """slug -> {title, description, items (in playing order)} for every series that has a published article."""
+        out = {}
+        for a in self.arts:
+            if a.series_id:
+                out.setdefault(a.series_id, []).append(a)
+        res = {}
+        for sl, items in out.items():
+            m = SERIES_META.get(sl, {})
+            items.sort(key=lambda x: (x.series_order if x.series_order is not None else 10**6, x.date))
+            res[sl] = {"title": m.get("title") or sl.replace("-", " ").title(), "description": m.get("description", ""), "items": items}
+        return res
+
     # -- urls / media
     def url(self, a, root):
         return f"{root}a/{a.slug}.html"
@@ -1319,6 +1343,35 @@ class Site:
               "url": f"{base}/archive/index.html" if base else None, "isPartOf": {"@id": f"{base}/#org"} if base else None}
         return self.page("All articles", html_, "../", desc=f"Every article published on {cfg['site_name']}, newest first: {n} stories on science, technology, society and culture.",
                          path="archive/index.html", ld={k: v for k, v in ld.items() if v})
+
+    def series_pages(self):
+        """(path, html) for the series overview and one playlist page per series."""
+        sm = self.series_map()
+        if not sm:
+            return []
+        out = []
+        ordered = sorted(sm.items(), key=lambda kv: (list(SERIES_META).index(kv[0]) if kv[0] in SERIES_META else 999, kv[1]["title"]))
+        cards = ""
+        for sl, m in ordered:
+            first = m["items"][0]
+            cards += (f'<article class="card m"><a href="{sl}.html"><div class="thumb">{self.picture(first, "../")}</div><div class="ct">'
+                      f'<p class="meta"><span class="cat">Series &middot; {len(m["items"])} parts</span></p><h3>{esc(m["title"])}</h3>'
+                      f'{"<p class=ex>" + esc(m["description"]) + "</p>" if m["description"] else ""}</div></a></article>')
+        out.append(("series/index.html", self.page("Series", f'<div class="wrap"><h1 class="pagetitle">Series</h1>'
+            f'<p class="lead">Stories told in parts. Pick a series and read it in order, like a playlist.</p><div class="grid3">{cards}</div></div>',
+            "../", desc="Article series", path="series/index.html")))
+        for sl, m in ordered:
+            rows = "".join(
+                f'<li><a href="../a/{x.slug}.html"><span class="sn">{n}</span><span class="st"><b>{esc(x.title)}</b>'
+                f'<small>{esc(x.category)} &middot; {x.read_min} min &middot; {esc(fmt_date(x.date))}</small></span>'
+                f'<span class="thumb">{self.picture(x, "../")}</span></a></li>' for n, x in enumerate(m["items"], 1))
+            mins = sum(x.read_min for x in m["items"])
+            body = (f'<div class="wrap narrow serpage"><p class="skick"><a href="index.html">Series</a></p><h1>{esc(m["title"])}</h1>'
+                    f'{"<p class=lead>" + esc(m["description"]) + "</p>" if m["description"] else ""}'
+                    f'<p class="count">{len(m["items"])} parts &middot; about {mins} min in total</p>'
+                    f'<a class="btn-start" href="../a/{m["items"][0].slug}.html">Start with part 1 &rsaquo;</a><ol class="playlist">{rows}</ol></div>')
+            out.append((f"series/{sl}.html", self.page(m["title"], body, "../", desc=m["description"] or f'{m["title"]}: a series from {self.cfg["site_name"]}', path=f"series/{sl}.html")))
+        return out
 
     def sparks_page(self):
         cfg = self.cfg; qn = cfg.get("quick_name") or "Sparks"
@@ -1670,9 +1723,12 @@ class Site:
         cnt = "".join(f'<a href="c/{sl}.html">{esc(c["name"])}<b>{len(c["items"])}</b></a>' for sl, c in list(self.cats.items())[:10])
         qn = esc(cfg.get("quick_name") or "Sparks")
         qk = "".join(f'<li><a href="{self.url(a, root)}">{esc(a.title)}</a><span>{a.read_min} min</span></li>' for a in sparks[:4])
+        smh = self.series_map()
+        sw = "".join(f'<li><a href="series/{sl}.html">{esc(m["title"])}</a><span>{len(m["items"])} parts</span></li>' for sl, m in list(smh.items())[:4])
         widgets = ('<section class="wrap widgets" aria-label="Quick access">'
                    + (f'<div class="wg"><h2>Topics</h2><div class="wtopics">{cnt}</div></div>' if cnt else "")
                    + (f'<div class="wg"><h2>{qn}</h2><ul class="wlist">{qk}</ul><p class="wmore"><a href="sparks/index.html">All {qn.lower()} &rsaquo;</a></p></div>' if qk else "")
+                   + (f'<div class="wg"><h2>Series</h2><ul class="wlist">{sw}</ul><p class="wmore"><a href="series/index.html">All series &rsaquo;</a></p></div>' if sw else "")
                    + '<div class="wg" id="wsaved" hidden><h2>Saved for you</h2><ul class="wlist" id="wsaved-list"></ul></div></section>')
         mr_pool = sorted(arts, key=lambda a: (-a.views, -a.date.timestamp()))[:cfg["most_read_count"]]
         if all(a.views == 0 for a in mr_pool):
@@ -1819,11 +1875,18 @@ class Site:
             lis = "".join(f"<li>{linkify(esc(c)).replace(chr(10), '<br>')}</li>" for c in items)
             parts.append(f'<section class="cites"><h2>Sources &amp; credits</h2><ul>{lis}</ul></section>')
 
-        if a.series_id:
-            ser = sorted([x for x in self.arts if x.series_id == a.series_id], key=lambda x: x.series_order)
-            if len(ser) > 1:
-                lis = "".join(f'<li{" class=cur" if x is a else ""}><a href="{x.slug}.html">{esc(x.title)}</a></li>' for x in ser)
-                parts.append(f'<section class="series"><h2>In this series</h2><ol>{lis}</ol></section>')
+        sm = self.series_map().get(a.series_id) if a.series_id else None
+        if sm and a in sm["items"]:
+            ser, k = sm["items"], sm["items"].index(a)
+            lis = "".join(f'<li{" class=cur" if x is a else ""}><a href="{x.slug}.html">{esc(x.title)}</a></li>' for x in ser)
+            nav = ""
+            if k > 0:
+                nav += f'<a class="sprev" href="{ser[k-1].slug}.html">&lsaquo; Previous<span>{esc(ser[k-1].title)}</span></a>'
+            if k < len(ser) - 1:
+                nav += f'<a class="snext" href="{ser[k+1].slug}.html">Next &rsaquo;<span>{esc(ser[k+1].title)}</span></a>'
+            parts.append(f'<section class="series"><p class="skick">Series &middot; part {k+1} of {len(ser)}</p>'
+                         f'<h2><a href="../series/{esc(a.series_id)}.html">{esc(sm["title"])}</a></h2><ol>{lis}</ol>'
+                         f'{"<div class=snav>" + nav + "</div>" if nav else ""}</section>')
 
         share_url = esc(self.cfg["base_url"].rstrip("/") + f"/a/{fname}.html") if self.cfg["base_url"] else ""
         if share_url:
@@ -1944,7 +2007,7 @@ class Site:
             if mod: x += f"<lastmod>{mod.strftime('%Y-%m-%d')}</lastmod>"
             if img and str(img).startswith("http"): x += f"<image:image><image:loc>{esc(img)}</image:loc></image:image>"
             return x + "</url>"
-        rows = [u(f"{base}/"), u(f"{base}/about/index.html"), u(f"{base}/archive/index.html"), u(f"{base}/impressum/index.html")] + ([u(f"{base}/sparks/index.html")] if any(a.quick for a in self.arts) else []) + [u(f"{base}/c/{s}.html") for s in self.cats]
+        rows = [u(f"{base}/"), u(f"{base}/about/index.html"), u(f"{base}/archive/index.html"), u(f"{base}/impressum/index.html")] + ([u(f"{base}/sparks/index.html")] if any(a.quick for a in self.arts) else []) + [u(f"{base}/{p}") for p, _ in self.series_pages()] + [u(f"{base}/c/{s}.html") for s in self.cats]
         for a in self.arts:
             if a.is_embed or a.slug in skip: continue
             mod = a.updated or a.date
@@ -2130,7 +2193,7 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
         site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
                      "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners", "ui_language", "theme", "security", "listen")
         conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys},
-                           "ver": {"tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js"), "green": asset_ver("greenroom.js"), "schedule": asset_ver("schedule-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
+                           "ver": {"series": asset_ver("series-editor.js"), "tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js"), "green": asset_ver("greenroom.js"), "schedule": asset_ver("schedule-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
                 .replace("{{CSS_VER}}", asset_ver("editor.css")).replace("{{JS_VER}}", asset_ver("editor.js")))
         w("editor/index.html", page)
@@ -2146,6 +2209,11 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     if not site.embed:
         (out / "archive").mkdir()
         w("archive/index.html", site.archive_page(redirects))
+        sp = site.series_pages()
+        if sp:
+            (out / "series").mkdir()
+            for pth, html in sp:
+                w(pth, html)
         if any(a.quick for a in site.arts):
             (out / "sparks").mkdir()
             w("sparks/index.html", site.sparks_page())
@@ -2215,6 +2283,7 @@ def main():
         shutil.rmtree(OUT)
     base = cfg["base_url"].rstrip("/")
     keep, red = view_for(arts, partners, None, base)
+    SERIES_META.update(fetch_series(cfg))
     site = Site(cfg, keep, now)
     write_site(site, keep, red, OUT, True, cfg)
     pws = partner_passwords(cfg)
