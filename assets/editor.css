@@ -323,3 +323,10 @@ body.focusing{overflow:hidden}
 @media(max-width:760px){.series .cols2{grid-template-columns:1fr}}
 .splist{list-style:none;margin:10px 0;padding:0}.splist li{display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--line,#8883)}
 .splist li.on{background:var(--soft)}.splist .stt{flex:1}.splist .sn{min-width:26px;font-weight:700;color:var(--muted)}.splist .lnk{flex:1;text-align:start}
+.rep{display:flex;flex-direction:column;gap:10px;margin:8px 0 14px}.reprow{display:flex;gap:10px;align-items:flex-start;background:var(--soft);padding:10px}
+.repbody{flex:1;min-width:0}.repbtn{display:flex;flex-direction:column;gap:4px}.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media(max-width:700px){.row3{grid-template-columns:1fr}.reprow{flex-direction:column}.repbtn{flex-direction:row}}
+.arclist{list-style:none;margin:10px 0;padding:0}.arclist li{display:flex;gap:12px;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line,#8883)}
+.arcmain{min-width:0}.arcmain a,.arcmain b{font-size:16px;font-weight:600}.arcmain small{display:block;color:var(--muted)}.arcmain p{margin:3px 0 0}
+.arcbtn{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start;justify-content:flex-end}
+@media(max-width:700px){.arclist li{flex-direction:column}}

@@ -422,3 +422,18 @@ Open the editor's **Series** tab to create series: give it a title and descripti
 If sign-up or sending does nothing, the `newsletter` function almost always has **Verify JWT** switched on. In Supabase open Edge Functions > newsletter > Details and switch **Verify JWT** off (the function checks who is calling itself). The editor now says this when it sees that error. Also check, in the editor: Settings > Newsletter > **Show the sign-up box on the website** is ticked and saved, and Newsletter > Design has a sender name, sender email (verified with your email service) and your postal address.
 
 Site keywords (Settings > Search engines) accept hundreds of keywords, separated by commas or one per line.
+
+## About page, official languages, Portfolio (Settings in the editor)
+Settings now has three more panels (admins only):
+- **About page**: your own headline, picture and text (blank line = paragraph, `## ` heading, `- ` list, `**bold**`, `[words](https://link)`). Leave the text empty to keep the standard About page. It is still translated automatically for visitors in other languages.
+- **Our official languages**: add the languages your organisation works in (one-click buttons for English, German, French, Spanish, Arabic, Chinese, Russian). They show on the About page and as a moving band on the Portfolio page.
+- **Portfolio page**: tick "Show the Portfolio page" and it appears at `/portfolio/` with a footer link. You edit the title, short line, introduction, **numbers that count up** (typed, or automatic: articles, sections, series, languages, public archive items), highlight cards with pictures and links, a milestone timeline and a button. Motion is switched off for visitors who ask their device for less motion.
+
+Run `supabase/settings.sql` again if you ever rebuild the database (already applied to the live project).
+
+## Archives: public and staff-only
+`supabase/archive.sql` (already applied to the live project) adds the **Archive** window in the editor with two archives:
+- **Public archive**: shown to everyone at `/library/` ("Public archive" in the footer), grouped by year with type filters. The page updates after the next rebuild (automatically if instant updates are set up).
+- **Staff archive**: private. It is protected by the database itself: people without access are never sent the items, and it is never part of the website. Admins choose who has access in the same window ("Who can open the staff archive"). Editors and admins add, change, move (public/private) and delete items; others can only read.
+
+Items are links to files (Google Drive, Dropbox, Cloudinary, your own site), plus title, type, year, tags and description. For the staff archive, use links that only your team can open.

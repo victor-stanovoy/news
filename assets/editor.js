@@ -412,7 +412,7 @@
       h('button', { class: 'lnk', type: 'button', text: 'Password', onclick: function () { guard(function () { renderPassword(false); }); } }),
       h('button', { class: 'lnk', type: 'button', text: 'Sign out', onclick: function () { guard(signOut); } }));
 
-    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['schedule', 'Schedule', '#/schedule'], ['newsletter', 'Newsletter', '#/newsletter'], ['polls', 'Polls', '#/polls'], ['series', 'Series', '#/series']] : [], me.role === 'admin' ? [['badges', 'Badges', '#/badges'], ['settings', 'Settings', '#/settings']] : []);
+    var windows = [['articles', 'Articles', '#/']].concat(canPublish() ? [['radio', 'Radio studio', '#/radio'], ['tv', 'TV studio', '#/tv'], ['schedule', 'Schedule', '#/schedule'], ['newsletter', 'Newsletter', '#/newsletter'], ['polls', 'Polls', '#/polls'], ['series', 'Series', '#/series']] : [], [['archive', 'Archive', '#/archive']], me.role === 'admin' ? [['badges', 'Badges', '#/badges'], ['settings', 'Settings', '#/settings']] : []);
     tabsEl = h('nav', { class: 'tabs', 'aria-label': 'Workspaces' }, windows.map(function (w) {
       return h('button', { class: 'tab', type: 'button', 'data-v': w[0], onclick: function () { guard(function () { if (location.hash === w[2] || (w[0] === 'articles' && !location.hash)) route(); else location.hash = w[2]; }); } },
         w[1], w[0] === 'radio' || w[0] === 'tv' ? h('i', { class: 'dot', title: 'On air' }) : null);
@@ -572,6 +572,16 @@
       Promise.all([loadScript('../assets/vendor/qrcode.js'), loadScript('../assets/badges-editor.js?v=' + ((cfg.ver || {}).badges || ''))]).then(function () {
         if (view !== 'badges') return;
         stage.replaceChildren(window.SparkBadges.mount({ h: h, field: field, check: check, toast: toast, sb: sb, errText: errText, upload: upload, site: cfg.site }));
+      }).catch(function (e) { stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'msg err', text: errText(e) }))); });
+      return;
+    }
+    if (location.hash === '#/archive') {
+      if (dashCleanup) { dashCleanup(); dashCleanup = null; }
+      current = null; dirty = false; view = 'archive';
+      stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'empty', text: 'Loading…' }))); paintTabs();
+      loadScript('../assets/archive-editor.js?v=' + ((cfg.ver || {}).arch || '')).then(function () {
+        if (view !== 'archive') return;
+        stage.replaceChildren(window.SparkArchive.mount({ h: h, field: field, toast: toast, sb: sb, errText: errText, me: me }));
       }).catch(function (e) { stage.replaceChildren(h('div', { class: 'dash' }, h('div', { class: 'msg err', text: errText(e) }))); });
       return;
     }
@@ -1649,6 +1659,10 @@
           return crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: salt, iterations: iter }, k, 256);
         }).then(function (b) { return [].map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join(''); });
       }
+      var pagesBox = h('div', { class: 'pagesbox' });
+      loadScript('../assets/pages-editor.js?v=' + ((cfg.ver || {}).pages || '')).then(function () {
+        pagesBox.replaceChildren.apply(pagesBox, window.SparkPages.panels({ h: h, field: field, check: check, V: V, mark: mark }));
+      }).catch(function () { pagesBox.appendChild(h('div', { class: 'msg err', text: 'The About, languages and Portfolio panels could not load. Reload the page.' })); });
       function lookPanel() {
         var ul = h('select', { onchange: function () { V.ui_language = ul.value; mark(); } }, [['auto', 'Automatic: the visitor\u2019s browser language'], ['en', 'English'], ['ar', '\u0627\u0644\u0639\u0631\u0628\u064a\u0629 (Arabic, right to left)'], ['zh', '\u4e2d\u6587 (Chinese)'], ['fr', 'Fran\u00e7ais (French)'], ['ru', '\u0420\u0443\u0441\u0441\u043a\u0438\u0439 (Russian)'], ['es', 'Espa\u00f1ol (Spanish)'], ['de', 'Deutsch (German)'], ['off', 'Off: no interface translation']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
         ul.value = V.ui_language || 'auto';
@@ -1794,7 +1808,7 @@
             field('Minimum words to publish', bind(V.editorial, 'min_words', 'number', { min: 0, max: 5000, step: 10 }), '0 = no minimum. Writers see a live word count; articles below the minimum can be saved as drafts but not published.'),
             tick(V.editorial, 'admin_override', 'Admins may publish a shorter article anyway (they get a confirmation)'),
             tick(V.editorial, 'show_wordcount', 'Show the word count next to "min read" on published articles')),
-          lookPanel(), securityPanel(),
+          lookPanel(), securityPanel(), pagesBox,
           annPanel(), maintPanel(),
           h('section', { class: 'panel' }, h('h3', { text: 'Tickers' }),
             tick(V.ticker, 'enabled', 'Show the headline bar under the menu'),

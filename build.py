@@ -58,6 +58,10 @@ DEFAULT_CONFIG = {
     "breaking_max_age_days": 7,     # breaking banner hides after this many days (0 = never hide)
     "most_read_count": 5,
     "quick_name": "Sparks",
+    # editable pages (Settings in the editor)
+    "about_page": {"lead": "", "body": "", "image": ""},
+    "official_languages": [],          # [{"name": "English", "native": "English"}]: the languages the organisation officially works in
+    "portfolio": {"enabled": False, "title": "", "tagline": "", "intro": "", "stats": [], "highlights": [], "milestones": [], "cta_text": "", "cta_link": ""},
     # Impressum (legal notice, required for Austrian/German websites). Fill in site.json; empty lines are left out.
     "impressum": {"owner": "", "legal_form": "", "address": "", "email": "", "phone": "", "uid": "", "register": "",
                   "responsible": "", "purpose": "Independent news, analysis and features", "supervisory": "", "extra": ""},
@@ -462,6 +466,17 @@ def fetch_db(cfg):
     return rows, set(map(str, ids)) | {str(r.get("id")) for r in rows}
 
 
+ARCHIVE_PUBLIC = []   # public archive items (archive.sql); empty if not set up
+
+
+def fetch_archive(cfg):
+    url, key = db_settings(cfg)
+    if not url or not key:
+        return []
+    rows = db_get(url, key, "/rest/v1/archive_items?select=id,title,description,url,kind,year,tags,created_at&scope=eq.public&order=year.desc.nullslast,created_at.desc&limit=2000", optional=True) or []
+    return [r for r in rows if isinstance(r, dict) and r.get("title")]
+
+
 SERIES_META = {}      # slug -> {"title", "description"}, from the article_series table (series.sql); empty if not set up
 
 
@@ -528,6 +543,33 @@ def clean_keywords(v, limit=20):
     return out[:limit]
 
 
+def _https(v):
+    v = v.strip() if isinstance(v, str) else ""
+    return v[:400] if re.match(r"^https?://[^\s\"'<>]+$", v) else ""
+
+
+def mini_md(text):
+    """Plain text from the editor to safe HTML: blank line = new paragraph, '## ' heading, '- ' list, **bold**, [text](https://link)."""
+    def inline(t):
+        t = esc(t)
+        t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
+        return re.sub(r"\[([^\]]{1,120})\]\((https?://[^\s)\"'<>]+)\)", r'<a href="\2">\1</a>', t)
+    out = []
+    for blk in re.split(r"\n\s*\n", (text or "").replace("\r", "").strip()):
+        lines = [l for l in blk.split("\n") if l.strip()]
+        if not lines:
+            continue
+        if all(l.lstrip().startswith("- ") for l in lines):
+            out.append("<ul>" + "".join(f"<li>{inline(l.lstrip()[2:])}</li>" for l in lines) + "</ul>")
+        elif lines[0].startswith("## "):
+            out.append(f"<h2>{inline(lines[0][3:])}</h2>")
+            if lines[1:]:
+                out.append(f"<p>{inline(' '.join(l.strip() for l in lines[1:]))}</p>")
+        else:
+            out.append(f"<p>{inline(' '.join(l.strip() for l in lines))}</p>")
+    return "".join(out)
+
+
 def clean_settings(d):
     """Settings saved in the editor, reduced to known keys with safe types. Anything else is ignored."""
     out = {}
@@ -540,6 +582,24 @@ def clean_settings(d):
     for k, lo, hi in (("nav_max", 1, 20), ("home_category_sections", 0, 20), ("most_read_count", 1, 20), ("breaking_max_age_days", 0, 365)):
         if k in d:
             out[k] = _int(d[k], lo, hi, DEFAULT_CONFIG[k])
+    if isinstance(d.get("about_page"), dict):
+        ap = d["about_page"]
+        out["about_page"] = {"lead": _str(ap.get("lead"), 300), "body": _str(ap.get("body"), 12000), "image": _https(ap.get("image"))}
+    if isinstance(d.get("official_languages"), list):
+        out["official_languages"] = [{"name": _str(x.get("name"), 40), "native": _str(x.get("native"), 40)}
+                                     for x in d["official_languages"][:40] if isinstance(x, dict) and _str(x.get("name"), 40)]
+    if isinstance(d.get("portfolio"), dict):
+        pf = d["portfolio"]
+        out["portfolio"] = {
+            "enabled": bool(pf.get("enabled")), "title": _str(pf.get("title"), 100), "tagline": _str(pf.get("tagline"), 200), "intro": _str(pf.get("intro"), 4000),
+            "stats": [{"source": x.get("source") if x.get("source") in ("fixed", "articles", "sections", "series", "languages", "archive") else "fixed",
+                       "value": _int(x.get("value"), 0, 10**9, 0), "prefix": _str(x.get("prefix"), 6), "suffix": _str(x.get("suffix"), 8), "label": _str(x.get("label"), 60)}
+                      for x in (pf.get("stats") or [])[:8] if isinstance(x, dict) and _str(x.get("label"), 60)],
+            "highlights": [{"title": _str(x.get("title"), 100), "text": _str(x.get("text"), 400), "image": _https(x.get("image")), "link": _https(x.get("link"))}
+                           for x in (pf.get("highlights") or [])[:12] if isinstance(x, dict) and _str(x.get("title"), 100)],
+            "milestones": [{"year": _str(x.get("year"), 12), "text": _str(x.get("text"), 240)}
+                           for x in (pf.get("milestones") or [])[:16] if isinstance(x, dict) and _str(x.get("text"), 240)],
+            "cta_text": _str(pf.get("cta_text"), 40), "cta_link": _https(pf.get("cta_link")) or (_str(pf.get("cta_link"), 80) if _str(pf.get("cta_link"), 80).startswith("/") else "")}
     if isinstance(d.get("nav_order"), list):
         out["nav_order"] = [_str(x, 80) for x in d["nav_order"][:40] if isinstance(x, str) and x.strip()]
     if isinstance(d.get("newsletter"), dict):
@@ -1301,20 +1361,93 @@ class Site:
                 out += f"Sitemap: {base}/news-sitemap.xml\n"
         return out
 
+    def lang_chips(self, root=""):
+        ls = self.cfg.get("official_languages") or []
+        if not ls:
+            return ""
+        chips = "".join(f'<li><b>{esc(x["name"])}</b>{"<span>" + esc(x["native"]) + "</span>" if x.get("native") and x["native"] != x["name"] else ""}</li>' for x in ls)
+        return f'<h2>Our official languages</h2><ul class="langchips">{chips}</ul>'
+
     def about_page(self):
-        cfg = self.cfg; seo = cfg["seo"]; base = cfg["base_url"].rstrip("/")
-        body = (f'<div class="wrap narrow aboutpage"><h1>About {esc(cfg["site_name"])}</h1>'
-                f'<p class="lead"><b>Independent Journalism. Real Opportunities.</b></p>'
-                f'<p>{esc(seo.get("about") or cfg["tagline"])}</p>'
-                '<h2>Our main publication</h2><p>Our news platform publishes articles on science, technology, society, culture and other subjects that spark ideas, encourage curiosity and inspire readers to look beyond the ordinary.</p>'
-                '<h2>School media partners</h2><p>Beyond our main publication, we partner with schools to establish and power their own student media platforms. Students write articles, conduct interviews, report on their communities and explore radio, television and digital publishing. Each school platform has its own identity and editorial focus, with the infrastructure, guidance and support of SparkNews behind it.</p>'
-                '<h2>Our mission</h2><p>To make journalism more accessible, encourage independent thinking and give new voices the opportunity to be heard.</p>'
-                f'<p><a href="../index.html">Read the latest stories &rarr;</a></p></div>')
-        body = body.replace('<div class="wrap narrow aboutpage">', '<div class="wrap narrow aboutpage">', 1)
-        body = '<div class="wrap narrow aboutpage">' + translated_page(body[len('<div class="wrap narrow aboutpage">'):-len('</div>')]) + '</div>'
+        cfg = self.cfg; seo = cfg["seo"]; base = cfg["base_url"].rstrip("/"); ap = cfg.get("about_page") or {}
+        lead = ap.get("lead") or "Independent Journalism. Real Opportunities."
+        if ap.get("body"):
+            main = (f'<h1>About {esc(cfg["site_name"])}</h1><p class="lead"><b>{esc(lead)}</b></p>'
+                    + (f'<p><img class="aboutimg" src="{esc(ap["image"])}" alt="" loading="lazy"></p>' if ap.get("image") else "")
+                    + mini_md(ap["body"]))
+        else:
+            main = (f'<h1>About {esc(cfg["site_name"])}</h1><p class="lead"><b>{esc(lead)}</b></p>'
+                    + (f'<p><img class="aboutimg" src="{esc(ap["image"])}" alt="" loading="lazy"></p>' if ap.get("image") else "")
+                    + f'<p>{esc(seo.get("about") or cfg["tagline"])}</p>'
+                    '<h2>Our main publication</h2><p>Our news platform publishes articles on science, technology, society, culture and other subjects that spark ideas, encourage curiosity and inspire readers to look at the world differently.</p>'
+                    '<h2>School media partners</h2><p>Beyond our main publication, we partner with schools to establish and power their own student media platforms. Students write articles, conduct interviews, report on school life and publish their work to a real audience.</p>'
+                    '<h2>Our mission</h2><p>To make journalism more accessible, encourage independent thinking and give new voices the opportunity to be heard.</p>')
+        main += self.lang_chips() + '<p><a href="../index.html">Read the latest stories &rarr;</a></p>'
+        body = '<div class="wrap narrow aboutpage">' + translated_page(main) + '</div>'
         ld = {"@context": "https://schema.org", "@type": "AboutPage", "name": f"About {cfg['site_name']}", "url": f"{base}/about/" if base else None,
               "mainEntity": {"@id": f"{base}/#org"} if base else None}
         return self.page("About", body, "../", desc=(seo.get("about") or cfg["tagline"])[:200], path="about/index.html", ld={k: v for k, v in ld.items() if v})
+
+    def portfolio_page(self):
+        cfg = self.cfg; pf = cfg["portfolio"]; sm = self.series_map()
+        auto = {"articles": len([a for a in self.arts if not a.is_embed]), "sections": len(self.cats), "series": len(sm),
+                "languages": len(cfg.get("official_languages") or []), "archive": len(ARCHIVE_PUBLIC)}
+        stats = ""
+        for st in pf["stats"]:
+            n = auto.get(st["source"], 0) if st["source"] != "fixed" else st["value"]
+            stats += (f'<div class="pf-stat rv"><p class="pf-num"><span>{esc(st["prefix"])}</span><b class="pfn" data-to="{n}">{n:,}</b><span>{esc(st["suffix"])}</span></p>'
+                      f'<p class="pf-lab">{esc(st["label"])}</p></div>')
+        cards = ""
+        for k, hi in enumerate(pf["highlights"]):
+            img = f'<div class="pf-img"><img src="{esc(hi["image"])}" alt="" loading="lazy"></div>' if hi["image"] else f'<div class="pf-img pf-ph"><span>{k + 1:02d}</span></div>'
+            inner = f'{img}<div class="pf-ct"><h3>{esc(hi["title"])}</h3>{"<p>" + esc(hi["text"]) + "</p>" if hi["text"] else ""}</div>'
+            cards += (f'<a class="pf-card rv" href="{esc(hi["link"])}">{inner}</a>' if hi["link"] else f'<div class="pf-card rv">{inner}</div>')
+        ls = cfg.get("official_languages") or []
+        marq = "".join(f'<span>{esc(x["name"])}</span>' for x in ls)
+        tl = "".join(f'<li class="rv"><b>{esc(m["year"])}</b><p>{esc(m["text"])}</p></li>' for m in pf["milestones"])
+        cta = (f'<section class="pf-cta rv"><a class="btn-start" href="{esc(pf["cta_link"])}">{esc(pf["cta_text"] or "Get in touch")} &rsaquo;</a></section>' if pf["cta_link"] else "")
+        title = pf["title"] or "Our portfolio"
+        body = (f'<div class="pf"><header class="pf-hero"><div class="wrap"><p class="pf-kick">{esc(cfg["site_name"])}</p><h1>{esc(title)}</h1>'
+                f'{"<p class=pf-tag>" + esc(pf["tagline"]) + "</p>" if pf["tagline"] else ""}</div></header>'
+                + (f'<section class="wrap pf-stats">{stats}</section>' if stats else "")
+                + (f'<section class="wrap narrow pf-intro rv">{mini_md(pf["intro"])}</section>' if pf["intro"] else "")
+                + (f'<section class="wrap"><h2 class="pf-h rv">Highlights</h2><div class="pf-grid">{cards}</div></section>' if cards else "")
+                + (f'<section class="pf-marq" aria-label="Our official languages"><div class="pf-track">{marq}{marq}</div></section>' if marq else "")
+                + (f'<section class="wrap narrow"><h2 class="pf-h rv">Milestones</h2><ol class="pf-tl">{tl}</ol></section>' if tl else "")
+                + cta + '</div>'
+                '<script>(function(){var r=matchMedia("(prefers-reduced-motion: reduce)").matches,els=document.querySelectorAll(".pf .rv"),cs=document.querySelectorAll(".pf .pfn");'
+                'if(r||!("IntersectionObserver" in window)){els.forEach(function(e){e.classList.add("in")});return}'
+                'document.querySelector(".pf").classList.add("pfjs");cs.forEach(function(c){c.textContent="0"});var f=function(c){var to=+c.dataset.to,t0=null;(function s(t){if(!t0)t0=t;var p=Math.min(1,(t-t0)/1600),e=1-Math.pow(1-p,3);'
+                'c.textContent=Math.round(to*e).toLocaleString();if(p<1)requestAnimationFrame(s)})(performance.now())};'
+                'var io=new IntersectionObserver(function(es){es.forEach(function(x){if(!x.isIntersecting)return;x.target.classList.add("in");x.target.querySelectorAll(".pfn").forEach(f);io.unobserve(x.target)})},{threshold:.2});'
+                'els.forEach(function(e){io.observe(e)})})()</script>')
+        return self.page(title, body, "../", desc=(pf["tagline"] or f"{title}: {cfg['site_name']}")[:200], path="portfolio/index.html")
+
+    def library_page(self):
+        cfg = self.cfg; items = ARCHIVE_PUBLIC
+        kinds = {"document": "Documents", "issue": "Issues", "photo": "Photos", "video": "Video", "audio": "Audio", "other": "Other"}
+        used = [k for k in kinds if any(i.get("kind") == k for i in items)]
+        chips = ('<div class="afilter" role="group" aria-label="Show"><button type="button" data-f="" class="on">All</button>'
+                 + "".join(f'<button type="button" data-f="{k}">{kinds[k]}</button>' for k in used) + "</div>") if len(used) > 1 else ""
+        groups = {}
+        for i in items:
+            groups.setdefault(i.get("year") or 0, []).append(i)
+        out = ""
+        for y in sorted(groups, reverse=True):
+            lis = ""
+            for i in groups[y]:
+                t = esc(i["title"]); link = f'<a href="{esc(i["url"])}" rel="noopener">{t}</a>' if i.get("url") else f"<b>{t}</b>"
+                lis += (f'<li data-k="{esc(i.get("kind") or "document")}">{link}<small>{esc(kinds.get(i.get("kind"), "Other"))}'
+                        f'{" &middot; " + esc(i["tags"]) if i.get("tags") else ""}</small>{"<p>" + esc(i["description"]) + "</p>" if i.get("description") else ""}</li>')
+            out += f'<h2>{y or "Undated"}</h2><ul class="liblist">{lis}</ul>'
+        body = (f'<div class="wrap narrow archive"><h1>Public archive</h1><p class="lead">Documents, issues, photos and recordings from {esc(cfg["site_name"])}, open to everyone.</p>'
+                f'<p><a href="../archive/index.html">Looking for an article? See all articles &rsaquo;</a></p>{chips}'
+                f'<div id="lib">{out or "<p class=count>Nothing here yet.</p>"}</div></div>'
+                '<script>document.querySelectorAll(".afilter button").forEach(function(b){b.onclick=function(){var f=b.dataset.f;'
+                'document.querySelectorAll(".afilter button").forEach(function(x){x.classList.toggle("on",x===b)});'
+                'document.querySelectorAll("#lib li").forEach(function(li){li.hidden=f&&li.dataset.k!==f});'
+                'document.querySelectorAll("#lib h2").forEach(function(h){h.hidden=!h.nextElementSibling.querySelector("li:not([hidden])")})}})</script>')
+        return self.page("Public archive", body, "../", desc=f"Public archive of {cfg['site_name']}: documents, issues, photos and recordings.", path="library/index.html")
 
     def archive_page(self, skip=()):
         """Every article on one plain page, newest first, grouped by month: the easiest thing for crawlers (and people) to follow."""
@@ -1551,7 +1684,7 @@ class Site:
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
         return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
-                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}about/index.html">About</a>{"" if self.embed else f' &middot; <a href="{root}archive/index.html">All articles</a>'} &middot; <a href="{root}privacy/index.html">Privacy</a> &middot; <a href="{root}impressum/index.html">Impressum</a>{"" if self.locked() else ' &middot; <a href="#" data-cookie-settings>Cookie settings</a>'}</p>'
+                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}about/index.html">About</a>{"" if self.embed else f' &middot; <a href="{root}archive/index.html">All articles</a> &middot; <a href="{root}library/index.html">Public archive</a>'}{"" if self.embed or not self.cfg["portfolio"].get("enabled") else f' &middot; <a href="{root}portfolio/index.html">Portfolio</a>'} &middot; <a href="{root}privacy/index.html">Privacy</a> &middot; <a href="{root}impressum/index.html">Impressum</a>{"" if self.locked() else ' &middot; <a href="#" data-cookie-settings>Cookie settings</a>'}</p>'
                 f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
 
     def ticker_entries(self, root):
@@ -2007,7 +2140,7 @@ class Site:
             if mod: x += f"<lastmod>{mod.strftime('%Y-%m-%d')}</lastmod>"
             if img and str(img).startswith("http"): x += f"<image:image><image:loc>{esc(img)}</image:loc></image:image>"
             return x + "</url>"
-        rows = [u(f"{base}/"), u(f"{base}/about/index.html"), u(f"{base}/archive/index.html"), u(f"{base}/impressum/index.html")] + ([u(f"{base}/sparks/index.html")] if any(a.quick for a in self.arts) else []) + [u(f"{base}/{p}") for p, _ in self.series_pages()] + [u(f"{base}/c/{s}.html") for s in self.cats]
+        rows = [u(f"{base}/"), u(f"{base}/about/index.html"), u(f"{base}/archive/index.html"), u(f"{base}/impressum/index.html"), u(f"{base}/library/index.html")] + ([u(f"{base}/portfolio/index.html")] if self.cfg["portfolio"].get("enabled") else []) + ([u(f"{base}/sparks/index.html")] if any(a.quick for a in self.arts) else []) + [u(f"{base}/{p}") for p, _ in self.series_pages()] + [u(f"{base}/c/{s}.html") for s in self.cats]
         for a in self.arts:
             if a.is_embed or a.slug in skip: continue
             mod = a.updated or a.date
@@ -2191,9 +2324,9 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
         (out / "editor").mkdir()
         url, key = db_settings(cfg)
         site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
-                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners", "ui_language", "theme", "security", "listen")
+                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners", "about_page", "official_languages", "portfolio", "ui_language", "theme", "security", "listen")
         conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys},
-                           "ver": {"series": asset_ver("series-editor.js"), "tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js"), "green": asset_ver("greenroom.js"), "schedule": asset_ver("schedule-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
+                           "ver": {"pages": asset_ver("pages-editor.js"), "arch": asset_ver("archive-editor.js"), "series": asset_ver("series-editor.js"), "tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js"), "green": asset_ver("greenroom.js"), "schedule": asset_ver("schedule-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
                 .replace("{{CSS_VER}}", asset_ver("editor.css")).replace("{{JS_VER}}", asset_ver("editor.js")))
         w("editor/index.html", page)
@@ -2203,6 +2336,11 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
     w("privacy/index.html", site.privacy_page())
     (out / "impressum").mkdir()
     w("impressum/index.html", site.impressum_page())
+    (out / "library").mkdir()
+    w("library/index.html", site.library_page())
+    if site.cfg["portfolio"].get("enabled"):
+        (out / "portfolio").mkdir()
+        w("portfolio/index.html", site.portfolio_page())
     (out / "about").mkdir()
     w("about/index.html", site.about_page())
     _tr_save()
@@ -2284,6 +2422,7 @@ def main():
     base = cfg["base_url"].rstrip("/")
     keep, red = view_for(arts, partners, None, base)
     SERIES_META.update(fetch_series(cfg))
+    ARCHIVE_PUBLIC[:] = fetch_archive(cfg)
     site = Site(cfg, keep, now)
     write_site(site, keep, red, OUT, True, cfg)
     pws = partner_passwords(cfg)
