@@ -477,6 +477,7 @@ def fetch_archive(cfg):
     return [r for r in rows if isinstance(r, dict) and r.get("title")]
 
 
+MAIN_NAME = "SparkNews"   # the name of the main site, shown on partner copies
 SERIES_META = {}      # slug -> {"title", "description"}, from the article_series table (series.sql); empty if not set up
 
 
@@ -1180,7 +1181,7 @@ class Site:
         """slug -> {title, description, items (in playing order)} for every series that has a published article."""
         out = {}
         for a in self.arts:
-            if a.series_id:
+            if a.series_id and (a.series_id in SERIES_META or not re.fullmatch(r"[0-9a-f]{16,}", a.series_id.lower())):   # old unnamed ids stay hidden until named in the editor
                 out.setdefault(a.series_id, []).append(a)
         res = {}
         for sl, items in out.items():
@@ -1349,7 +1350,11 @@ class Site:
 
     def accent_css(self):
         p = self.partner(self.embed) if self.embed else None
-        return f'<style>:root{{--accent:{p["accent"]};--spark:{p["accent"]}}}</style>' if p and p.get("accent") else ""
+        if not (p and re.match(r"^#[0-9a-fA-F]{6}$", p.get("accent") or "")):
+            return ""
+        r, g, b = (int(p["accent"][i:i + 2], 16) for i in (1, 3, 5))
+        dark = "#%02x%02x%02x" % (int(r * .32), int(g * .32), int(b * .32))
+        return f'<style>:root{{--accent:{p["accent"]};--spark:{p["accent"]};--head:{dark}}}</style>'
 
     def seo_tags(self, ld=None):
         cfg = self.cfg; seo = cfg["seo"]; o = ""
@@ -1516,7 +1521,7 @@ class Site:
         for sl, m in ordered:
             first = m["items"][0]
             cards += (f'<article class="card m"><a href="{sl}.html"><div class="thumb">{self.picture(first, "../")}</div><div class="ct">'
-                      f'<p class="meta"><span class="cat">Series &middot; {len(m["items"])} parts</span></p><h3>{esc(m["title"])}</h3>'
+                      f'<p class="meta"><span class="cat">Series &middot; {len(m["items"])} part{"s" if len(m["items"]) != 1 else ""}</span></p><h3>{esc(m["title"])}</h3>'
                       f'{"<p class=ex>" + esc(m["description"]) + "</p>" if m["description"] else ""}</div></a></article>')
         out.append(("series/index.html", self.page("Series", f'<div class="wrap"><h1 class="pagetitle">Series</h1>'
             f'<p class="lead">Stories told in parts. Pick a series and read it in order, like a playlist.</p><div class="grid3">{cards}</div></div>',
@@ -1529,7 +1534,7 @@ class Site:
             mins = sum(x.read_min for x in m["items"])
             body = (f'<div class="wrap narrow serpage"><p class="skick"><a href="index.html">Series</a></p><h1>{esc(m["title"])}</h1>'
                     f'{"<p class=lead>" + esc(m["description"]) + "</p>" if m["description"] else ""}'
-                    f'<p class="count">{len(m["items"])} parts &middot; about {mins} min in total</p>'
+                    f'<p class="count">{len(m["items"])} part{"s" if len(m["items"]) != 1 else ""} &middot; about {mins} min in total</p>'
                     f'<a class="btn-start" href="../a/{m["items"][0].slug}.html">Start with part 1 &rsaquo;</a><ol class="playlist">{rows}</ol></div>')
             out.append((f"series/{sl}.html", self.page(m["title"], body, "../", desc=m["description"] or f'{m["title"]}: a series from {self.cfg["site_name"]}', path=f"series/{sl}.html")))
         return out
@@ -1699,7 +1704,10 @@ class Site:
                     f'<div class="morep wrap">{"".join(links[n:])}</div></details>')
         livelink = (f'<a class="livelink{" on" if active == "live" else ""}" href="{root}live/index.html"><i></i>Live</a>'
                     if self.live_on() else "")
-        return f'''<body{' class="embed"' if self.embed else ''}><a class="skip" href="#main">Skip to content</a>
+        main_base = self.cfg.get("_main_base", "")
+        netbar = (f'<div class="netbar"><div class="wrap"><a href="{esc(main_base or "https://www.sparknews.cc")}/">&lsaquo; {esc(MAIN_NAME)}</a>'
+                  f'<span>Student media, powered by {esc(MAIN_NAME)}</span></div></div>') if self.embed else ""
+        return f'''<body{' class="embed"' if self.embed else ''}><a class="skip" href="#main">Skip to content</a>{netbar}
 <header class="top"><div class="wrap bar">
 <span class="dateline">{self.now.strftime("%A, %B ") + str(self.now.day) + self.now.strftime(", %Y")}</span>
 {logo}
@@ -1713,7 +1721,8 @@ class Site:
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
         return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
                 f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}about/index.html">About</a>{"" if self.embed else f' &middot; <a href="{root}archive/index.html">All articles</a> &middot; <a href="{root}library/index.html">Public archive</a>'}{"" if self.embed or not self.cfg["portfolio"].get("enabled") else f' &middot; <a href="{root}portfolio/index.html">Portfolio</a>'} &middot; <a href="{root}privacy/index.html">Privacy</a> &middot; <a href="{root}impressum/index.html">Impressum</a>{"" if self.locked() else ' &middot; <a href="#" data-cookie-settings>Cookie settings</a>'}</p>'
-                f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p></div></footer>{self.scripts(root)}</body></html>')
+                f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p>'
+                f'{"<p class=powered>Powered by <a href=" + chr(34) + esc(self.cfg.get("_main_base", "") or "https://www.sparknews.cc") + "/" + chr(34) + ">" + esc(MAIN_NAME) + "</a></p>" if self.embed else ""}</div></footer>{self.scripts(root)}</body></html>')
 
     def ticker_entries(self, root):
         t = self.cfg["ticker"]
@@ -1885,7 +1894,7 @@ class Site:
         qn = esc(cfg.get("quick_name") or "Sparks")
         qk = "".join(f'<li><a href="{self.url(a, root)}">{esc(a.title)}</a><span>{a.read_min} min</span></li>' for a in sparks[:4])
         smh = self.series_map()
-        sw = "".join(f'<li><a href="series/{sl}.html">{esc(m["title"])}</a><span>{len(m["items"])} parts</span></li>' for sl, m in list(smh.items())[:4])
+        sw = "".join(f'<li><a href="series/{sl}.html">{esc(m["title"])}</a><span>{len(m["items"])} part{"s" if len(m["items"]) != 1 else ""}</span></li>' for sl, m in list(smh.items())[:4])
         widgets = ('<section class="wrap widgets" aria-label="Quick access">'
                    + (f'<div class="wg"><h2>Topics</h2><div class="wtopics">{cnt}</div></div>' if cnt else "")
                    + (f'<div class="wg"><h2>{qn}</h2><ul class="wlist">{qk}</ul><p class="wmore"><a href="sparks/index.html">All {qn.lower()} &rsaquo;</a></p></div>' if qk else "")

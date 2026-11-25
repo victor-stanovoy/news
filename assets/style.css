@@ -843,3 +843,35 @@ a.pf-card:hover{transform:translateY(-6px);outline:3px solid var(--spark)}
 .imgcred{color:var(--text2)}
 @media (max-width:560px){.lb{padding:10px 8px}.lb .lb-p,.lb .lb-n{top:auto;bottom:10px;height:44px}}
 @media print{.gal-btn,.gal-count{display:none}.gallery.slideshow .strip{display:block}.gallery.slideshow figure{margin-bottom:10px}}
+
+/* ===== Unified flat button system, share bar, settings cards, partner network bar ===== */
+.share a,.share button,.savebtn,.copylink,.langs a,.afilter button,.prefspage button,.btn-start{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:0 16px;box-sizing:border-box;
+  font:inherit;font-size:14px;font-weight:700;line-height:1;text-decoration:none;color:var(--ink);background:var(--bg);
+  border:1.5px solid var(--ink);border-radius:0;cursor:pointer;transform:none;transition:background .15s,color .15s,border-color .15s}
+.share a:hover,.share button:hover,.savebtn:hover,.copylink:hover,.langs a:hover,.afilter button:hover,.prefspage button:hover{background:var(--ink);color:var(--bg);border-color:var(--ink);transform:none}
+.share a:focus-visible,.share button:focus-visible,.savebtn:focus-visible,.langs a:focus-visible,.afilter button:focus-visible,.prefspage button:focus-visible,.btn-start:focus-visible,.gbtn:focus-visible,.pgo:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.share{gap:8px;margin-top:28px;padding-top:18px;border-top:1px solid var(--line)}
+.share span{flex:0 0 100%;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 2px}
+.share .savebtn.done,.savebtn.done{background:var(--accent);border-color:var(--accent);color:#fff}
+.share .copylink.done{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-start,.gbtn.main,.pgo{background:var(--accent);border:1.5px solid var(--accent);color:#fff;min-height:44px;padding:0 22px}
+.btn-start:hover,.gbtn.main:hover:not(:disabled),.pgo:hover:not(:disabled){background:var(--head);border-color:var(--head);color:#fff}
+.langs a,.afilter button{min-height:34px;padding:0 13px;font-weight:600;border-width:1px;border-color:var(--line)}
+.langs a.on,.afilter button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.gbtn{min-height:44px;border-width:1.5px}
+button:disabled,.pgo:disabled{opacity:.5;cursor:not-allowed}
+.prefspage fieldset{border:0;border-left:4px solid var(--accent);background:var(--card,transparent);box-shadow:inset 0 0 0 1px var(--line);padding:20px 22px 14px;margin:0 0 20px}
+.prefspage legend{font-size:13px;letter-spacing:.08em;text-transform:uppercase;padding:0 8px;margin-left:-8px}
+.prefspage .switch,.prefspage .opt{font-size:15px;line-height:1.35;padding:9px 0;border-top:1px solid var(--line)}
+.prefspage fieldset>.switch:first-of-type,.prefspage fieldset>.opt:first-of-type{border-top:0}
+.prefspage .sub{font-size:14px;color:var(--muted);line-height:1.5}
+/* partner sites */
+.netbar{background:#0b0b0b;color:#cfcfcf;font-size:12px}
+.netbar .wrap{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:32px;flex-wrap:wrap}
+.netbar a{color:#fff;font-weight:700;text-decoration:none}.netbar a:hover{text-decoration:underline}
+.embed .top{border-top:0;border-bottom:4px solid var(--accent)}
+.embed body,.embed{border:0}
+.foot .powered{margin:6px 0 0;font-size:12px;opacity:.75}.foot .powered a{color:inherit;font-weight:700}
+.share .copylink,.share .savebtn{font-size:14px;font-weight:700;border:1.5px solid var(--ink);padding:0 16px}
+.share .copylink.done,.share .savebtn.done{border-color:var(--accent)}

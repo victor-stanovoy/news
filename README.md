@@ -442,3 +442,9 @@ Items are links to files (Google Drive, Dropbox, Cloudinary, your own site), plu
 In an article's editor, **Extra images** (one per line) now show **right under the cover picture**, and every picture keeps its own shape (nothing is cropped). Choose **Grid** (all pictures at once) or **Slideshow** (one at a time, with arrows and swipe) under "Extra images layout". Clicking the cover or any extra picture opens it full screen with arrows, swipe, arrow keys and Escape.
 
 Every picture is credited automatically: under the picture, in the viewer, and in the "Sources & credits" box at the bottom. The credit is worked out from where the picture is hosted (Unsplash, Pexels, Wikimedia Commons, NASA… or the website address; pictures you upload yourself are credited to the site). To give a caption and the real photographer, write the line as `https://…/photo.jpg | Caption | Photographer or source` (caption and source are optional).
+
+## Buttons and partner sites
+
+All buttons (share bar, Save, Copy link, language chips, filters, Settings) use one flat style: square corners, 40px height, outlined, inverting on hover, with a visible focus ring. Primary actions use the accent colour.
+
+Partner copies now derive a dark shade from the partner's `accent` for the top rule, LATEST label and footer, show a slim "Student media, powered by SparkNews" bar linking back to the main site, and a "Powered by SparkNews" footer line. Old series with only a hash id stay hidden until you name them in the Series tab.
