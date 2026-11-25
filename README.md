@@ -437,3 +437,8 @@ Run `supabase/settings.sql` again if you ever rebuild the database (already appl
 - **Staff archive**: private. It is protected by the database itself: people without access are never sent the items, and it is never part of the website. Admins choose who has access in the same window ("Who can open the staff archive"). Editors and admins add, change, move (public/private) and delete items; others can only read.
 
 Items are links to files (Google Drive, Dropbox, Cloudinary, your own site), plus title, type, year, tags and description. For the staff archive, use links that only your team can open.
+
+## Extra pictures: grid or slideshow, expandable, credited
+In an article's editor, **Extra images** (one per line) now show **right under the cover picture**, and every picture keeps its own shape (nothing is cropped). Choose **Grid** (all pictures at once) or **Slideshow** (one at a time, with arrows and swipe) under "Extra images layout". Clicking the cover or any extra picture opens it full screen with arrows, swipe, arrow keys and Escape.
+
+Every picture is credited automatically: under the picture, in the viewer, and in the "Sources & credits" box at the bottom. The credit is worked out from where the picture is hosted (Unsplash, Pexels, Wikimedia Commons, NASA… or the website address; pictures you upload yourself are credited to the site). To give a caption and the real photographer, write the line as `https://…/photo.jpg | Caption | Photographer or source` (caption and source are optional).

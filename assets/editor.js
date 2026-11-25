@@ -2069,8 +2069,8 @@
     }
 
     /* advanced */
-    f.extra = h('textarea', { class: 'code', placeholder: 'One image address per line', oninput: mark }); f.extra.value = (a.additional_images || []).join('\n');
-    f.layout = h('select', { onchange: mark }, h('option', { value: 'grid', text: 'Grid' }), h('option', { value: 'carousel', text: 'Carousel' })); f.layout.value = a.image_layout || 'grid';
+    f.extra = h('textarea', { class: 'code', rows: 5, placeholder: 'One image per line:\nhttps://…/photo.jpg\nhttps://…/photo2.jpg | Caption | Photographer or source', oninput: mark }); f.extra.value = (a.additional_images || []).join('\n');
+    f.layout = h('select', { onchange: mark }, h('option', { value: 'grid', text: 'Grid (all pictures, own shapes)' }), h('option', { value: 'slideshow', text: 'Slideshow (one at a time)' })); f.layout.value = (a.image_layout === 'carousel' ? 'slideshow' : a.image_layout) || 'grid';
     f.video = h('input', { type: 'url', value: a.reporter_video_url || '', placeholder: 'YouTube link', oninput: mark });
     f.citations = h('textarea', { class: 'code', placeholder: 'Sources and credits. Separate entries with a blank line.', oninput: mark }); f.citations.value = a.citations || '';
     function counter(input, max) { var c = h('small', { class: 'hint' }); function u() { var n = input.value.length; c.textContent = n + ' / ' + max + (n > max ? ' (may be cut off in search results)' : ''); }
@@ -2168,9 +2168,9 @@
             h('div', { class: 'up' }, h('button', { class: 'btn', type: 'button', text: 'Upload image', onclick: function () { pickImage(function (u) { f.image.value = u; mark(); showCover(); }); } })),
             h('div', { class: 'row2', style: 'margin-top:12px' }, field('Focus left–right', f.fx), field('Focus top–bottom', f.fy))),
           h('div', { class: 'panel' }, h('details', { class: 'adv' }, h('summary', { text: 'More options' }),
-            field('Article type', f.contentType), field('Extra images', f.extra),
+            field('Article type', f.contentType), field('Extra images', f.extra, 'One per line. Optional after the address, separated by " | ": a caption, then the photographer or source. If you leave the source out, it is worked out from where the picture is hosted (Unsplash, Wikimedia, your own uploads count as ' + (cfg.site && cfg.site.site_name || 'the site') + ').'),
             h('div', { class: 'up', style: 'margin:-6px 0 12px' }, h('button', { class: 'btn', type: 'button', text: 'Upload & add', onclick: function () { pickImage(function (u) { f.extra.value = (f.extra.value.trim() ? f.extra.value.trim() + '\n' : '') + u; mark(); }); } })),
-            field('Extra images layout', f.layout), field('Video', f.video), field('Sources & credits', f.citations),
+            field('Extra images layout', f.layout, 'They show right under the cover picture, keep their own shape, open full screen when clicked, and are credited automatically.'), field('Video', f.video), field('Sources & credits', f.citations),
             h('div', { class: 'row2' }, field('Series', f.seriesId), field('Part number', f.seriesOrder)), live.box, liveBox)),
           seoPanel,
           h('div', { class: 'panel' }, h('h3', { text: 'Translations' }), h('p', { class: 'hint', text: 'Add a language, then press "Translate for me": it translates the headline, the summary and the whole article with free services (no account needed; if the first is unavailable it uses a second one with a small daily limit). Names you list below stay as they are. It is good enough to read but not perfect, so have someone check it before you publish.' }), field('This article is written in', f.srcLang), field('Keep these names untranslated', keepIn, 'The author and the site name are always kept.'), aiT.box, trBox, trSel, h('div', { class: 'btnrow' }, allBtn)),

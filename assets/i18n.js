@@ -68,6 +68,7 @@
     'Start with part 1': ['ابدأ بالجزء 1', '从第1部分开始', 'Commencer par la partie 1', 'Начать с части 1', 'Empezar por la parte 1', 'Mit Teil 1 beginnen'],
     'Previous': ['السابق', '上一篇', 'Précédent', 'Назад', 'Anterior', 'Zurück'],
     'Next': ['التالي', '下一篇', 'Suivant', 'Далее', 'Siguiente', 'Weiter'],
+    'Photo': ['صورة', '图片', 'Photo', 'Фото', 'Foto', 'Foto'],
     'Save': ['حفظ', '保存', 'Enregistrer', 'Сохранить', 'Guardar', 'Speichern'],
     'Saved articles': ['المقالات المحفوظة', '已保存的文章', 'Articles enregistrés', 'Сохранённые статьи', 'Artículos guardados', 'Gespeicherte Artikel'],
     'Nothing saved yet.': ['لا شيء محفوظ بعد.', '尚未保存任何内容。', 'Rien d’enregistré pour le moment.', 'Пока ничего не сохранено.', 'Aún no hay nada guardado.', 'Noch nichts gespeichert.'],

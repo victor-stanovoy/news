@@ -548,6 +548,34 @@ def _https(v):
     return v[:400] if re.match(r"^https?://[^\s\"'<>]+$", v) else ""
 
 
+_OWN_IMG_HOSTS = ("cloudinary.com", "supabase.co", "supabase.in")
+_KNOWN_IMG = {"unsplash.com": "Unsplash", "images.unsplash.com": "Unsplash", "pexels.com": "Pexels", "images.pexels.com": "Pexels", "pixabay.com": "Pixabay",
+              "cdn.pixabay.com": "Pixabay", "upload.wikimedia.org": "Wikimedia Commons", "commons.wikimedia.org": "Wikimedia Commons",
+              "flickr.com": "Flickr", "staticflickr.com": "Flickr", "nasa.gov": "NASA", "images-assets.nasa.gov": "NASA", "wikipedia.org": "Wikipedia",
+              "gettyimages.com": "Getty Images", "media.gettyimages.com": "Getty Images", "apnews.com": "AP", "reuters.com": "Reuters"}
+
+
+def image_credit(url, site_name, base_url=""):
+    """Who to credit for a picture, worked out from where it is hosted. Our own storage is credited to the site itself."""
+    host = (re.sub(r"^https?://", "", str(url or "").strip(), flags=re.I).split("/")[0].split(":")[0] or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    if not host:
+        return site_name
+    mine = re.sub(r"^https?://(www\.)?", "", base_url or "", flags=re.I).split("/")[0].lower()
+    if (mine and host == mine) or any(host == h or host.endswith("." + h) for h in _OWN_IMG_HOSTS):
+        return site_name
+    for k, v in _KNOWN_IMG.items():
+        if host == k or host.endswith("." + k):
+            return v
+    return host
+
+
+def split_image_line(entry):
+    """'address | caption | credit' (caption and credit optional) -> (address, caption, credit)."""
+    p = [x.strip() for x in str(entry).split(" | ")]
+    return p[0], (p[1] if len(p) > 1 else ""), (p[2] if len(p) > 2 else "")
+
+
 def mini_md(text):
     """Plain text from the editor to safe HTML: blank line = new paragraph, '## ' heading, '- ' list, **bold**, [text](https://link)."""
     def inline(t):
@@ -1969,8 +1997,25 @@ class Site:
 
         src = self.img(a.image_raw, root)
         if src:
-            parts.append(f'<figure class="cover"><img src="{esc(src)}" alt="{esc(title)}" fetchpriority="high" style="object-position:{a.fx}% {a.fy}%" '
-                         f'referrerpolicy="no-referrer" onerror="this.parentNode.remove()"></figure>')
+            ccred = image_credit(a.image_raw, self.cfg["site_name"], self.cfg.get("base_url", ""))
+            parts.append(f'<figure class="cover" data-credit="{esc(ccred)}"><img src="{esc(src)}" alt="{esc(title)}" fetchpriority="high" style="object-position:{a.fx}% {a.fy}%" '
+                         f'referrerpolicy="no-referrer" onerror="this.parentNode.remove()">'
+                         f'<figcaption class="pcred"><span class="pl">Photo</span>: {esc(ccred)}</figcaption></figure>')
+
+        extra_credits = []
+        if a.extra_images:
+            figs = ""
+            for n, entry in enumerate(a.extra_images, 1):
+                u, cap, cred = split_image_line(entry)
+                if not self.img(u, root):
+                    continue
+                cred = cred or image_credit(u, self.cfg["site_name"], self.cfg.get("base_url", ""))
+                extra_credits.append((n, cap, cred))
+                figs += (f'<figure data-credit="{esc(cred)}"><img src="{esc(self.img(u, root))}" alt="{esc(cap)}" loading="lazy" referrerpolicy="no-referrer" '
+                         f'onerror="this.parentNode.remove()"><figcaption>{esc(cap) + " " if cap else ""}<span class="pcred"><span class="pl">Photo</span>: {esc(cred)}</span></figcaption></figure>')
+            if figs:
+                show = a.layout in ("carousel", "slideshow")
+                parts.append(f'<div class="gallery {"slideshow" if show else "mosaic"}" data-gallery>{figs}</div>')
 
         if a.video:
             v = a.video
@@ -1997,16 +2042,18 @@ class Site:
         else:
             parts.append(f'<div class="body">{body_html}</div>')
 
-        if a.extra_images:
-            figs = "".join(f'<figure><img src="{esc(self.img(u, root))}" alt="" loading="lazy" referrerpolicy="no-referrer"></figure>'
-                           for u in a.extra_images)
-            cls = "gallery carousel" if a.layout == "carousel" else "gallery"
-            parts.append(f'<div class="{cls}">{figs}</div>')
-
+        imgcred = ""
+        if src:
+            bits = [f'Cover: {esc(ccred)}'] + [f'{n}: {esc(c)}' for n, _cap, c in extra_credits]
+            imgcred = f'<li class="imgcred"><b><span class="pl">Photo</span> credits.</b> ' + " &middot; ".join(bits) + "</li>"
+        elif extra_credits:
+            imgcred = '<li class="imgcred"><b><span class="pl">Photo</span> credits.</b> ' + " &middot; ".join(f'{n}: {esc(c)}' for n, _cap, c in extra_credits) + "</li>"
         if a.citations.strip():
             items = [c.strip() for c in re.split(r"\n\s*\n", a.citations) if c.strip()]
             lis = "".join(f"<li>{linkify(esc(c)).replace(chr(10), '<br>')}</li>" for c in items)
-            parts.append(f'<section class="cites"><h2>Sources &amp; credits</h2><ul>{lis}</ul></section>')
+            parts.append(f'<section class="cites"><h2>Sources &amp; credits</h2><ul>{lis}{imgcred}</ul></section>')
+        elif imgcred:
+            parts.append(f'<section class="cites"><h2>Sources &amp; credits</h2><ul>{imgcred}</ul></section>')
 
         sm = self.series_map().get(a.series_id) if a.series_id else None
         if sm and a in sm["items"]:
