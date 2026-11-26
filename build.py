@@ -1063,14 +1063,13 @@ def _tr_get(text, lang):
     key = hashlib.sha1((lang + "\n" + text).encode("utf-8")).hexdigest()[:20]
     if key in _TR["data"]:
         return _TR["data"][key]
-    if _TR["dead"] or os.environ.get("SPARK_NO_TRANSLATE") or os.environ.get("SPARK_PREVIEW_OFFLINE"):
+    if os.environ.get("SPARK_NO_TRANSLATE") or os.environ.get("SPARK_PREVIEW_OFFLINE"):
         return None
-    if _TR["t0"] is None:
-        _TR["t0"] = time.time()
-    if time.time() - _TR["t0"] > 120:
-        _TR["dead"] = True
+    st = _TR.setdefault("lang", {}).setdefault(lang, {"spent": 0.0, "fails": 0})   # each language has its own time budget and failure count, so the last one (German) is never starved
+    if st["fails"] >= 4 or st["spent"] > 90:
         return None
     out = None
+    t_start = time.time()
     if os.environ.get("SPARK_FAKE_TRANSLATE"):
         out = "[%s] %s" % (lang, text)
     else:
@@ -1094,9 +1093,10 @@ def _tr_get(text, lang):
             except Exception:
                 out = None
         if not out:
-            _TR["dead"] = _TR.get("fails", 0) >= 3
-            _TR["fails"] = _TR.get("fails", 0) + 1
+            st["fails"] += 1
+            st["spent"] += time.time() - t_start
             return None
+    st["spent"] += time.time() - t_start
     _TR["data"][key] = out
     return out
 
