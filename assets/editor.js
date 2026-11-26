@@ -47,7 +47,19 @@
       return decode(String((j.responseData && j.responseData.translatedText) || '')) || text;
     });
   }
-  function tOne(text, from, to) {
+  function isLimit(e) { return /\b429\b|too many|slow down|\brate\b/i.test((e && e.message) || ''); }
+  function tOne(text, from, to) {          /* if the service asks us to slow down, wait and try again (up to about 4 minutes) before giving up */
+    var waits = [20000, 40000, 60000, 90000];
+    function go(i) {
+      return tOne1(text, from, to).catch(function (e) {
+        if (!isLimit(e) || i >= waits.length) throw e;
+        if (engine.note) engine.note('The translation service asked us to slow down. Waiting ' + Math.round(waits[i] / 1000) + ' seconds, then continuing…');
+        return wait(waits[i]).then(function () { engine.g = true; engine.bad = 0; return go(i + 1); });
+      });
+    }
+    return go(0);
+  }
+  function tOne1(text, from, to) {
     var terms = protectTerms.filter(function (t) { return t && text.toLowerCase().indexOf(t.toLowerCase()) >= 0; }), safe = text;
     terms.forEach(function (t, i) { safe = safe.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'ZQ' + i + 'X'); });
     if (!engine.g && Date.now() - engine.since > 90000) { engine.g = true; engine.bad = 0; }   /* give Google another chance after a pause instead of giving up for the whole session */
@@ -112,16 +124,34 @@
     }
     var done = 0;
     function tick() { done++; if (progress) progress(done, jobs.length); }
-    return jobs.reduce(function (p, job) {
+    jobs.forEach(function (job) { if (job.block) job.m = markBlock(job.block); job.t = job.node ? job.node.nodeValue : job.m.text; });
+    function apply1(job, t) {             /* put one translated piece back; resolves when done */
+      if (job.node) { var lead = (job.t.match(/^\s*/) || [''])[0], tail = (job.t.match(/\s*$/) || [''])[0]; job.node.nodeValue = lead + t.trim() + tail; tick(); return Promise.resolve(); }
+      var hh = unmark(t, job.m);
+      if (hh != null) { job.block.innerHTML = hh; tick(); return Promise.resolve(); }
+      var ns = [], tw = doc.createTreeWalker(job.block, NodeFilter.SHOW_TEXT, null), x;     /* markers got lost: the old way, piece by piece */
+      while ((x = tw.nextNode())) if (x.nodeValue.trim()) ns.push(x);
+      return ns.reduce(function (q, nd) { return q.then(function () { return mmText(nd.nodeValue, from, to).then(function (t2) { nd.nodeValue = t2; }); }); }, Promise.resolve()).then(tick);
+    }
+    function single(job) { return mmText(job.t, from, to).then(function (t) { return apply1(job, t); }); }
+    /* many short paragraphs go out in one request (paragraphs separated by blank lines): far fewer calls, so the free service does not block us */
+    var groups = [], cur = [], len = 0;
+    jobs.forEach(function (job) {
+      var solo = /\n\s*\n/.test(job.t) || job.t.length > 900;
+      if (solo) { if (cur.length) { groups.push(cur); cur = []; len = 0; } groups.push([job]); return; }
+      if (cur.length && (len + job.t.length > 1200 || cur.length >= 30)) { groups.push(cur); cur = []; len = 0; }
+      cur.push(job); len += job.t.length + 2;
+    });
+    if (cur.length) groups.push(cur);
+    return groups.reduce(function (p, g) {
       return p.then(function () {
-        if (job.node) return mmText(job.node.nodeValue, from, to).then(function (t) { job.node.nodeValue = t; tick(); });
-        var m = markBlock(job.block);
-        return mmText(m.text, from, to).then(function (t) {
-          var h = unmark(t, m);
-          if (h != null) { job.block.innerHTML = h; return tick(); }
-          var ns = [], tw = doc.createTreeWalker(job.block, NodeFilter.SHOW_TEXT, null), x;     /* markers got lost: the old way, piece by piece */
-          while ((x = tw.nextNode())) if (x.nodeValue.trim()) ns.push(x);
-          return ns.reduce(function (q, nd) { return q.then(function () { return mmText(nd.nodeValue, from, to).then(function (t2) { nd.nodeValue = t2; }); }); }, Promise.resolve()).then(tick);
+        if (g.length === 1) return single(g[0]);
+        var texts = g.map(function (job) { return job.t.trim(); });
+        if (texts.some(function (t) { return !t; })) return g.reduce(function (q, job) { return q.then(function () { return single(job); }); }, Promise.resolve());
+        return mmText(texts.join('\n\n'), from, to).then(function (t) {
+          var parts = t.split(/\n\s*\n/);
+          if (parts.length !== g.length) return g.reduce(function (q, job) { return q.then(function () { return single(job); }); }, Promise.resolve());   /* the service merged or split paragraphs: do them one by one */
+          return g.reduce(function (q, job, k) { return q.then(function () { return apply1(job, parts[k]); }); }, Promise.resolve());
         });
       });
     }, Promise.resolve())
@@ -1681,6 +1711,7 @@
         transBox.replaceChildren(window.SparkTranslate.panel({
           h: h, V: V, mark: mark, sb: sb, toast: toast, cfg: cfg, mmText: mmText, mmHtml: mmHtml,
           setProtect: function (list) { protectTerms = list; },
+          setNote: function (fn) { engine.note = fn; },
           categories: function () { var o = {}; articles.forEach(function (x) { if (x.category) o[x.category] = 1; }); return Object.keys(o); },
           saveSettings: function () { saveBtn.click(); }
         }));
@@ -2160,6 +2191,7 @@
         if (!src.t && !src.c) { toast('Write the headline or the article first.', true); return Promise.resolve(); }
         if (!quiet && (t.value || s.value || c.value) && !confirm('Replace the text in this ' + (LANGS[l] || l) + ' translation?')) return Promise.resolve();
         go.disabled = true; st.className = 'hint'; st.textContent = 'Translating\u2026';
+        engine.note = function (m) { st.textContent = m; };
         var from = f.srcLang.value || 'en';
         protectTerms = String(keepIn.value || '').split(/[,\n]/).map(function (x) { return x.trim(); }).filter(Boolean).concat([cfg.site && cfg.site.site_name, f.author && f.author.value].filter(function (x) { return x && x.length > 2; }));
         return mmText(src.t, from, l).then(function (x) { t.value = x; return mmText(src.s, from, l); }).then(function (x) { s.value = x; return mmHtml(src.c, from, l, function (d, n) { st.textContent = 'Translating\u2026 ' + d + ' of ' + n + ' paragraphs'; }); })

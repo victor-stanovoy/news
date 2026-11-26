@@ -40,6 +40,7 @@
       if (busy) return false;
       busy = true; stop = false; stopBtn.disabled = false; stopBtn.style.display = ''; bar.style.display = ''; bar.value = 0;
       allSite.disabled = allArt.disabled = true;
+      if (ctx.setNote) ctx.setNote(function (m) { log.className = 'hint'; log.textContent = m; });
       ctx.setProtect(String(keep.value || '').split(/[,\n]/).map(function (x) { return x.trim(); }).filter(Boolean).concat([(ctx.cfg.site || {}).site_name].filter(function (x) { return x && x.length > 2; })));
       return true;
     }
