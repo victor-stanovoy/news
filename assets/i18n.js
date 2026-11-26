@@ -116,6 +116,7 @@
     if (lookups[lang]) return lookups[lang];
     var i = ORDER.indexOf(lang), t = {};
     Object.keys(D).forEach(function (k) { t[k] = D[k][i]; });
+    var X = cfg.extra || {}; Object.keys(X).forEach(function (k) { if (X[k] && X[k][i]) t[k] = X[k][i]; });   /* texts translated from Settings override the built-in ones */
     return (lookups[lang] = t);
   }
   function tr(text, lang) {

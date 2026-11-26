@@ -61,6 +61,7 @@ DEFAULT_CONFIG = {
     # editable pages (Settings in the editor)
     "about_page": {"lead": "", "body": "", "image": ""},
     "official_languages": [],          # [{"name": "English", "native": "English"}]: the languages the organisation officially works in
+    "site_i18n": {},                   # {"English text": [ar, zh, fr, ru, es, de]}: texts translated from Settings > Translate everything
     "portfolio": {"enabled": False, "title": "", "tagline": "", "intro": "", "stats": [], "highlights": [], "milestones": [], "cta_text": "", "cta_link": ""},
     # Impressum (legal notice, required for Austrian/German websites). Fill in site.json; empty lines are left out.
     "impressum": {"owner": "", "legal_form": "", "address": "", "email": "", "phone": "", "uid": "", "register": "",
@@ -617,6 +618,14 @@ def clean_settings(d):
     if isinstance(d.get("official_languages"), list):
         out["official_languages"] = [{"name": _str(x.get("name"), 40), "native": _str(x.get("native"), 40)}
                                      for x in d["official_languages"][:40] if isinstance(x, dict) and _str(x.get("name"), 40)]
+    if isinstance(d.get("site_i18n"), dict):
+        t = {}
+        for k, v in list(d["site_i18n"].items())[:600]:
+            if isinstance(k, str) and 1 < len(k) <= 300 and isinstance(v, list):
+                row = [_str(x, 600) if isinstance(x, str) else "" for x in (v + [""] * 6)[:6]]
+                if any(row):
+                    t[k.strip()] = row
+        out["site_i18n"] = t
     if isinstance(d.get("portfolio"), dict):
         pf = d["portfolio"]
         out["portfolio"] = {
@@ -1770,6 +1779,8 @@ class Site:
         data["listen"] = {"on": bool((self.cfg.get("listen") or {}).get("enabled", True)), "pos": (self.cfg.get("listen") or {}).get("position", "left")}
         if self.cfg.get("ui_language") != "off":
             data["i18n"] = {"def": self.cfg.get("ui_language", "auto"), "site": self.cfg["language"][:2]}
+            if self.cfg.get("site_i18n"):
+                data["i18n"]["extra"] = self.cfg["site_i18n"]
         blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
         cons = "" if self.locked() else f'<script src="{root}assets/consent.js?v={asset_ver("consent.js")}" defer></script>'
         return (f'<script id="spark-ticker-data" type="application/json">{blob}</script>'
@@ -2380,9 +2391,9 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
         (out / "editor").mkdir()
         url, key = db_settings(cfg)
         site_keys = ("site_name", "logo_left", "logo_right", "tagline", "language", "base_url", "footer_text", "nav_max", "nav_order",
-                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners", "about_page", "official_languages", "portfolio", "ui_language", "theme", "security", "listen")
+                     "home_category_sections", "most_read_count", "breaking_max_age_days", "ticker", "live", "newsletter", "seo", "privacy", "polls", "partners", "about_page", "site_i18n", "official_languages", "portfolio", "ui_language", "theme", "security", "listen")
         conf = json.dumps({"url": url, "anon_key": key, "site": {k: site.cfg[k] for k in site_keys},
-                           "ver": {"pages": asset_ver("pages-editor.js"), "arch": asset_ver("archive-editor.js"), "series": asset_ver("series-editor.js"), "tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js"), "green": asset_ver("greenroom.js"), "schedule": asset_ver("schedule-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
+                           "ver": {"pages": asset_ver("pages-editor.js"), "arch": asset_ver("archive-editor.js"), "series": asset_ver("series-editor.js"), "trans": asset_ver("translate-editor.js"), "tpl": asset_ver("email-templates.js"), "nl": asset_ver("newsletter-editor.js"), "polls": asset_ver("polls-editor.js"), "badges": asset_ver("badges-editor.js"), "green": asset_ver("greenroom.js"), "schedule": asset_ver("schedule-editor.js")}}, ensure_ascii=False).replace("</", "<\\/")
         page = (ed.read_text(encoding="utf-8").replace("{{CONFIG}}", conf)
                 .replace("{{CSS_VER}}", asset_ver("editor.css")).replace("{{JS_VER}}", asset_ver("editor.js")))
         w("editor/index.html", page)

@@ -1663,6 +1663,15 @@
       loadScript('../assets/pages-editor.js?v=' + ((cfg.ver || {}).pages || '')).then(function () {
         pagesBox.replaceChildren.apply(pagesBox, window.SparkPages.panels({ h: h, field: field, check: check, V: V, mark: mark }));
       }).catch(function () { pagesBox.appendChild(h('div', { class: 'msg err', text: 'The About, languages and Portfolio panels could not load. Reload the page.' })); });
+      var transBox = h('div', { class: 'transbox' });
+      loadScript('../assets/translate-editor.js?v=' + ((cfg.ver || {}).trans || '')).then(function () {
+        transBox.replaceChildren(window.SparkTranslate.panel({
+          h: h, V: V, mark: mark, sb: sb, toast: toast, cfg: cfg, mmText: mmText, mmHtml: mmHtml,
+          setProtect: function (list) { protectTerms = list; },
+          categories: function () { var o = {}; articles.forEach(function (x) { if (x.category) o[x.category] = 1; }); return Object.keys(o); },
+          saveSettings: function () { saveBtn.click(); }
+        }));
+      }).catch(function () { transBox.appendChild(h('div', { class: 'msg err', text: 'The translation panel could not load. Reload the page.' })); });
       function lookPanel() {
         var ul = h('select', { onchange: function () { V.ui_language = ul.value; mark(); } }, [['auto', 'Automatic: the visitor\u2019s browser language'], ['en', 'English'], ['ar', '\u0627\u0644\u0639\u0631\u0628\u064a\u0629 (Arabic, right to left)'], ['zh', '\u4e2d\u6587 (Chinese)'], ['fr', 'Fran\u00e7ais (French)'], ['ru', '\u0420\u0443\u0441\u0441\u043a\u0438\u0439 (Russian)'], ['es', 'Espa\u00f1ol (Spanish)'], ['de', 'Deutsch (German)'], ['off', 'Off: no interface translation']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
         ul.value = V.ui_language || 'auto';
@@ -1808,7 +1817,7 @@
             field('Minimum words to publish', bind(V.editorial, 'min_words', 'number', { min: 0, max: 5000, step: 10 }), '0 = no minimum. Writers see a live word count; articles below the minimum can be saved as drafts but not published.'),
             tick(V.editorial, 'admin_override', 'Admins may publish a shorter article anyway (they get a confirmation)'),
             tick(V.editorial, 'show_wordcount', 'Show the word count next to "min read" on published articles')),
-          lookPanel(), securityPanel(), pagesBox,
+          lookPanel(), securityPanel(), pagesBox, transBox,
           annPanel(), maintPanel(),
           h('section', { class: 'panel' }, h('h3', { text: 'Tickers' }),
             tick(V.ticker, 'enabled', 'Show the headline bar under the menu'),
