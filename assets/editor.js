@@ -407,7 +407,7 @@
   function loadArticles() {
     var cols = 'id,slug,title,category,status,published_at,scheduled_publish_at,updated_at,created_by,taken_down,author_name';
     function q(c) { return sb.from('articles').select(c).order('updated_at', { ascending: false }).limit(2000); }
-    return q(cols + ',partner_label,partner_mode').then(function (r) { return r.error ? q(cols) : r; })
+    return q(cols + ',partner_label,partner_mode,article_format').then(function (r) { return r.error ? q(cols + ',partner_label,partner_mode') : r; }).then(function (r) { return r.error ? q(cols) : r; })
       .then(function (r) { if (r.error) toast(r.error.message, true); articles = r.data || []; });
   }
 
@@ -567,7 +567,7 @@
     if (dashCleanup) { dashCleanup(); dashCleanup = null; }
     var search = h('input', { type: 'text', placeholder: 'Search articles', 'aria-label': 'Search articles', value: query, oninput: function () { query = search.value.toLowerCase(); renderList(); } });
     var chips = h('div', { class: 'chips' });
-    [['all', 'All'], ['draft', 'Drafts'], ['published', 'Published'], ['scheduled', 'Scheduled']].forEach(function (f) {
+    [['all', 'All'], ['draft', 'Drafts'], ['published', 'Published'], ['scheduled', 'Scheduled'], ['quick', 'Sparks']].forEach(function (f) {
       chips.appendChild(h('button', { class: 'chip' + (filter === f[0] ? ' on' : ''), type: 'button', text: f[1], 'data-f': f[0],
         onclick: function () { filter = f[0]; chips.querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('on', c.dataset.f === filter); }); renderList(); } }));
     });
@@ -582,14 +582,15 @@
 
   function renderList() {
     var rows = articles.filter(function (a) {
-      if (filter !== 'all' && a.status !== filter) return false;
+      if (filter === 'quick') { if (a.article_format !== 'quick') return false; }
+      else if (filter !== 'all' && a.status !== filter) return false;
       return !query || (a.title + ' ' + (a.category || '') + ' ' + (a.author_name || '')).toLowerCase().indexOf(query) >= 0;
     });
     if (!rows.length) { listEl.replaceChildren(h('div', { class: 'empty', text: articles.length ? 'Nothing matches.' : 'No articles yet. Create the first one!' })); return; }
     listEl.replaceChildren.apply(listEl, rows.map(function (a) {
       return h('button', { class: 'item' + (current && current.id === a.id ? ' on' : ''), type: 'button', onclick: function () { guard(function () { location.hash = '#/edit/' + a.id; }); } },
         h('b', { text: a.title || '(untitled)' }),
-        h('span', {}, h('i', { class: 'badge ' + a.status, text: a.taken_down ? 'taken down' : a.status }), a.partner_label ? h('i', { class: 'badge ptag', title: 'Partner label', text: whereShort(a.partner_label, a.partner_mode) }) : (a.partner_mode === 'main' ? h('i', { class: 'badge ptag', title: 'Not shown in partner embeds', text: 'main site only' }) : null), (a.category || '') + ' · ' + fmtDate(a.updated_at)));
+        h('span', {}, h('i', { class: 'badge ' + a.status, text: a.taken_down ? 'taken down' : a.status }), a.article_format === 'quick' ? h('i', { class: 'badge ptag', title: 'A quick read (Spark)', text: 'Spark' }) : null, a.partner_label ? h('i', { class: 'badge ptag', title: 'Partner label', text: whereShort(a.partner_label, a.partner_mode) }) : (a.partner_mode === 'main' ? h('i', { class: 'badge ptag', title: 'Not shown in partner embeds', text: 'main site only' }) : null), (a.category || '') + ' · ' + fmtDate(a.updated_at)));
     }));
   }
 

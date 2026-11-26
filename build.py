@@ -1557,7 +1557,7 @@ class Site:
         body = (f'<div class="wrap"><h1 class="pagetitle">{esc(qn)}</h1>'
                 f'<p class="lead">Short reads: the news in a few minutes or less. Each one still sits in its own section.</p>'
                 f'<p class="count">{len(items)} short read{"s" if len(items) != 1 else ""}</p><div class="grid3">{grid}</div></div>')
-        return self.page(qn, body, "../", desc=f"{qn}: short reads from {cfg['site_name']}", path="sparks/index.html")
+        return self.page(qn, body, "../", desc=f"{qn}: short reads from {cfg['site_name']}", path="sparks/index.html", active="sparks")
 
     def ai_files_on(self):
         seo = self.cfg["seo"]
@@ -1718,20 +1718,23 @@ class Site:
         main_base = self.cfg.get("_main_base", "")
         netbar = (f'<div class="netbar"><div class="wrap"><a href="{esc(main_base or "https://www.sparknews.cc")}/">&lsaquo; {esc(MAIN_NAME)}</a>'
                   f'<span>Student media, powered by {esc(MAIN_NAME)}</span></div></div>') if self.embed else ""
+        qn_ = self.cfg.get("quick_name") or "Sparks"
+        sparklink = (f'<a class="sparklink{" on" if active == "sparks" else ""}" href="{root}sparks/index.html">{esc(qn_)}</a>'
+                     if any(a.quick and not a.is_embed for a in self.arts) else "")
         return f'''<body{' class="embed"' if self.embed else ''}><a class="skip" href="#main">Skip to content</a>{netbar}
 <header class="top"><div class="wrap bar">
 <span class="dateline">{self.now.strftime("%A, %B ") + str(self.now.day) + self.now.strftime(", %Y")}</span>
 {logo}
 <div class="tools"><form class="search" action="{root}search.html" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"><button aria-label="Search">&#9906;</button></form><button class="theme" type="button" aria-label="Switch light / dark mode" title="Light / dark"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M12 3.5a8.5 8.5 0 0 1 0 17z"/></svg></button></div>
 </div>
-</header><div class="navbar"><nav class="wrap menu" aria-label="Sections"><a href="{root}index.html"{" class=on" if active == "" else ""}>Home</a>{livelink}{nav}</nav></div>'''
+</header><div class="navbar"><nav class="wrap menu" aria-label="Sections"><a href="{root}index.html"{" class=on" if active == "" else ""}>Home</a>{livelink}{sparklink}{nav}</nav></div>'''
 
     def footer(self, root):
         cfg = self.cfg
         cats = "".join(f'<a href="{root}c/{s}.html">{esc(c["name"])}</a>' for s, c in self.cats.items())
         extra = f"<p>{esc(cfg['footer_text'])}</p>" if cfg["footer_text"] else ""
         return (f'{self.nlbox(root)}<footer class="foot"><div class="wrap"><a class="flogo" href="{root}index.html"><img src="{root}assets/logo.png?v={asset_ver("logo.png")}" width="36" height="36" alt=""><span>{esc(cfg["site_name"])}</span></a><div class="fcats">{cats}</div>{extra}'
-                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}about/index.html">About</a>{"" if self.embed else f' &middot; <a href="{root}archive/index.html">All articles</a> &middot; <a href="{root}library/index.html">Public archive</a>'}{"" if self.embed or not self.cfg["portfolio"].get("enabled") else f' &middot; <a href="{root}portfolio/index.html">Portfolio</a>'} &middot; <a href="{root}privacy/index.html">Privacy</a> &middot; <a href="{root}impressum/index.html">Impressum</a>{"" if self.locked() else ' &middot; <a href="#" data-cookie-settings>Cookie settings</a>'}</p>'
+                f'<p><a href="{root}settings/index.html">Settings</a> &middot; <a href="{root}about/index.html">About</a>{"" if self.embed else f' &middot; <a href="{root}archive/index.html">All articles</a>{(' &middot; <a href="' + root + 'sparks/index.html">' + esc(cfg.get("quick_name") or "Sparks") + '</a>') if any(x.quick and not x.is_embed for x in self.arts) else ""} &middot; <a href="{root}library/index.html">Public archive</a>'}{"" if self.embed or not self.cfg["portfolio"].get("enabled") else f' &middot; <a href="{root}portfolio/index.html">Portfolio</a>'} &middot; <a href="{root}privacy/index.html">Privacy</a> &middot; <a href="{root}impressum/index.html">Impressum</a>{"" if self.locked() else ' &middot; <a href="#" data-cookie-settings>Cookie settings</a>'}</p>'
                 f'<p>&copy; {self.now.year} {esc(cfg["site_name"])}. {esc(cfg["tagline"])}.</p>'
                 f'{"<p class=powered>Powered by <a href=" + chr(34) + esc(self.cfg.get("_main_base", "") or "https://www.sparknews.cc") + "/" + chr(34) + ">" + esc(MAIN_NAME) + "</a></p>" if self.embed else ""}</div></footer>{self.scripts(root)}</body></html>')
 
