@@ -163,6 +163,7 @@
     pages(lang);
     busy = false;
     var sel = document.querySelector('.uilang select'); if (sel) sel.value = lang;
+    syncMenu(lang);
     var ps = document.getElementById('ui-lang-pref'); if (ps) ps.value = stored() || 'auto';
   }
   /* fixed pages (About, Privacy) carry a translated copy per language, made when the site was built */
@@ -195,9 +196,39 @@
     var ic = document.createElement('span'); ic.setAttribute('aria-hidden', 'true'); ic.textContent = '🌐';
     w.appendChild(ic); w.appendChild(s); foot.appendChild(w); s.value = cur;
   }
+  /* the language menu at the top of every page: a flat dropdown with each language in its own script */
+  var GLOBE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>';
+  function syncMenu(lang) {
+    var m = document.querySelector('.langmenu'); if (!m) return;
+    m.querySelector('.lm-code').textContent = lang.toUpperCase();
+    [].forEach.call(m.querySelectorAll('[role=menuitemradio]'), function (b) { var on = b.getAttribute('data-l') === lang; b.setAttribute('aria-checked', on ? 'true' : 'false'); });
+  }
+  function menu() {
+    var tools = document.querySelector('.top .tools'); if (!tools || document.querySelector('.langmenu')) return;
+    var w = document.createElement('div'); w.className = 'langmenu'; w.setAttribute('data-no-i18n', ''); w.setAttribute('translate', 'no');
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'lm-btn'; btn.setAttribute('aria-haspopup', 'true'); btn.setAttribute('aria-expanded', 'false'); btn.setAttribute('aria-label', 'Language');
+    btn.innerHTML = GLOBE + '<span class="lm-code"></span><svg class="lm-car" viewBox="0 0 10 6" width="9" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+    var list = document.createElement('div'); list.className = 'lm-list'; list.setAttribute('role', 'menu'); list.hidden = true;
+    var all = ['en'].concat(ORDER); if (all.indexOf(base) < 0) all.unshift(base);
+    all.forEach(function (c) {
+      var b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'menuitemradio'); b.setAttribute('data-l', c); b.setAttribute('lang', c);
+      b.innerHTML = '<span class="lm-n"></span><span class="lm-c"></span>'; b.firstChild.textContent = LANGS[c] || c; b.lastChild.textContent = c.toUpperCase();
+      b.addEventListener('click', function () { set(c); close(); btn.focus(); });
+      list.appendChild(b);
+    });
+    function close() { list.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+    btn.addEventListener('click', function () { var o = list.hidden; list.hidden = !o; btn.setAttribute('aria-expanded', o ? 'true' : 'false'); if (o) { var on = list.querySelector('[aria-checked=true]') || list.firstChild; on.focus(); } });
+    w.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { close(); btn.focus(); }
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !list.hidden) { e.preventDefault(); var items = [].slice.call(list.children), i = items.indexOf(document.activeElement); items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus(); }
+    });
+    document.addEventListener('click', function (e) { if (!w.contains(e.target)) close(); });
+    w.appendChild(btn); w.appendChild(list); tools.insertBefore(w, tools.firstChild);
+    syncMenu(cur);
+  }
   function start() {
     if (!enabled) return;
-    picker();
+    picker(); menu();
     apply(pick());
     if ('MutationObserver' in window) {
       var t = 0;
