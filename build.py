@@ -1760,6 +1760,18 @@ class Site:
                 f'<button class="tpause" type="button" aria-label="Pause ticker" title="Pause / play">&#10074;&#10074;</button>'
                 f'</div></div>')
 
+    def cat_i18n(self):
+        """Section names in every language: translated automatically at build time (cached in data/translations.json), so sections follow the visitor's language."""
+        if getattr(self, "_cat_i18n", None) is None:
+            out = {}
+            for c in self.cats.values():
+                name = c["name"]
+                row = [_tr_get(name, l) or "" for l in PAGE_LANGS]
+                if any(row):
+                    out[name] = row
+            self._cat_i18n = out
+        return self._cat_i18n
+
     def scripts(self, root):
         t = self.cfg["ticker"]
         data = {"items": [x for x, _ in self.ticker_entries(root)], "tab": t["tab"]}
@@ -1779,8 +1791,12 @@ class Site:
         data["listen"] = {"on": bool((self.cfg.get("listen") or {}).get("enabled", True)), "pos": (self.cfg.get("listen") or {}).get("position", "left")}
         if self.cfg.get("ui_language") != "off":
             data["i18n"] = {"def": self.cfg.get("ui_language", "auto"), "site": self.cfg["language"][:2]}
-            if self.cfg.get("site_i18n"):
-                data["i18n"]["extra"] = self.cfg["site_i18n"]
+            extra = dict(self.cat_i18n())
+            extra.update(self.cfg.get("site_i18n") or {})        # texts the editor translated by hand or with the Settings button win
+            if extra:
+                data["i18n"]["extra"] = extra
+            if any(a.translations for a in self.arts):
+                data["i18n"]["tr"] = True
         blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
         cons = "" if self.locked() else f'<script src="{root}assets/consent.js?v={asset_ver("consent.js")}" defer></script>'
         return (f'<script id="spark-ticker-data" type="application/json">{blob}</script>'
@@ -2441,6 +2457,7 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
         w("guest/index.html", site.guest_page())
     for slug, c in site.cats.items():
         w(f"c/{slug}.html", site.category(slug, c))
+    tr_titles = {}
     for a in arts:
         if a.slug in redirects:
             who = (site.partner(a.label) or {}).get("name", "the partner site")
@@ -2453,6 +2470,13 @@ def write_site(site, arts, redirects, out, with_editor, cfg):
             w(f"a/{a.slug}-embed.html", site.embed_page(a))
         for lang in a.translations:
             w(f"a/{a.slug}.{lang}.html", site.article(a, lang))
+            if lang in PAGE_LANGS and (a.translations[lang].get("title") or "").strip():
+                tr_titles.setdefault(lang, {})[a.slug] = a.translations[lang]["title"].strip()
+    if tr_titles:                                   # headlines per language, so lists and cards can show (and link to) the translated article
+        (out / "assets" / "tr").mkdir(parents=True, exist_ok=True)
+        for lang, m in tr_titles.items():
+            (out / "assets" / "tr" / f"{lang}.json").write_text(json.dumps(m, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    _tr_save()
     if site.ai_files_on():
         for a in arts:
             if a.slug in redirects or a.is_embed:

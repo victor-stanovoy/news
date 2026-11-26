@@ -164,6 +164,7 @@
     busy = false;
     var sel = document.querySelector('.uilang select'); if (sel) sel.value = lang;
     syncMenu(lang);
+    artNav(lang); lists(lang);
     var ps = document.getElementById('ui-lang-pref'); if (ps) ps.value = stored() || 'auto';
   }
   /* fixed pages (About, Privacy) carry a translated copy per language, made when the site was built */
@@ -195,6 +196,38 @@
     s.addEventListener('change', function () { set(s.value); });
     var ic = document.createElement('span'); ic.setAttribute('aria-hidden', 'true'); ic.textContent = '🌐';
     w.appendChild(ic); w.appendChild(s); foot.appendChild(w); s.value = cur;
+  }
+  /* an article that has a translation opens in the visitor's language by itself; "Original" and the language buttons simply choose the language */
+  function artNav(lang) {
+    var nav = document.querySelector('main[data-page=article] nav.langs'); if (!nav) return;
+    var links = [].slice.call(nav.querySelectorAll('a')), here = null, orig = null, want = null;
+    links.forEach(function (a) {
+      if (a.classList.contains('on')) here = a;
+      if (!a.hasAttribute('hreflang')) orig = a; else if (a.getAttribute('hreflang') === lang) want = a;
+      if (!a.__i18n) { a.__i18n = 1; a.addEventListener('click', function (e) { if (e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); set(a.getAttribute('hreflang') || base); }); }
+    });
+    var target = (lang !== base && want) ? want : orig;
+    if (target && here && target !== here) location.replace(target.href);
+  }
+  /* cards and lists show the translated headline and link to the translated article */
+  var trCache = {};
+  function lists(lang) {
+    if (!cfg.tr) return;
+    var src = (document.querySelector('script[src*="i18n.js"]') || {}).src; if (!src) return;
+    function run(m) {
+      [].forEach.call(document.querySelectorAll('a[href]'), function (a) {
+        if (a.closest('nav.langs') || a.closest('.langmenu') || a.closest('.uilang') || a.closest('.body')) return;
+        var h = a.getAttribute('data-h0') || a.getAttribute('href'), mm = h.match(/^(.*?(?:^|\/)a\/)([^\/?#]+?)\.html([?#].*)?$/); if (!mm) return;
+        var t = m && m[mm[2]];
+        var hd = a.querySelector('h1,h2,h3,h4') || a.closest('h1,h2,h3,h4') || (a.children.length ? null : a);
+        if (!a.hasAttribute('data-h0')) { a.setAttribute('data-h0', h); if (hd) hd.setAttribute('data-t0', hd.textContent); }
+        if (t) { a.setAttribute('href', mm[1] + mm[2] + '.' + lang + '.html' + (mm[3] || '')); if (hd && hd.hasAttribute('data-t0')) hd.textContent = t; }
+        else { a.setAttribute('href', h); if (hd && hd.hasAttribute('data-t0')) hd.textContent = hd.getAttribute('data-t0'); }
+      });
+    }
+    if (lang === base) return run(null);
+    if (trCache[lang]) return run(trCache[lang]);
+    fetch(new URL('tr/' + lang + '.json', src)).then(function (r) { return r.ok ? r.json() : {}; }).then(function (m) { trCache[lang] = m; if (cur === lang) run(m); }, function () {});
   }
   /* the language menu at the top of every page: a flat dropdown with each language in its own script */
   var GLOBE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>';

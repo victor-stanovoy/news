@@ -452,3 +452,7 @@ Partner copies now derive a dark shade from the partner's `accent` for the top r
 ## Translate everything (Settings)
 
 Settings > "Translate everything" has two buttons. **Translate all site text** translates the tagline, footer, announcements, About, Portfolio, newsletter box, section names and similar texts into Arabic, Chinese, French, Russian, Spanish and German, and saves them (`site_i18n` in the settings; a visitor who picks a language sees them wherever a text matches exactly). **Translate all articles** translates headline, standfirst and text of every article that lacks a translation and saves each one in the article; press it again to continue after a stop. Both show progress and have a Stop button. Run `supabase/settings.sql` once (already applied to the live database).
+
+## Automatic language for visitors
+
+When a visitor picks a language (top-right menu, or their browser language): an article that has a translation opens in that language by itself, article lists and cards show the translated headline and link to the translated article, and section names are translated (automatically at build time, cached in `data/translations.json`; you can override any of them with "Translate all site text" in Settings). Choosing English / "Original" goes back to the original article. Articles without a translation stay in their language with the rest of the page translated.
