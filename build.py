@@ -1075,7 +1075,7 @@ def _tr_get(text, lang):
     if os.environ.get("SPARK_NO_TRANSLATE") or os.environ.get("SPARK_PREVIEW_OFFLINE"):
         return None
     st = _TR.setdefault("lang", {}).setdefault(lang, {"spent": 0.0, "fails": 0})   # each language has its own time budget and failure count, so the last one (German) is never starved
-    if st["fails"] >= 4 or st["spent"] > 90:
+    if st["fails"] >= 6 or st["spent"] > 150:
         return None
     out = None
     t_start = time.time()
@@ -1083,15 +1083,17 @@ def _tr_get(text, lang):
         out = "[%s] %s" % (lang, text)
     else:
         code = _TR_LANGCODE.get(lang, lang)
-        for attempt in range(2):
+        for attempt in range(3):
             try:
-                url = "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=en&tl=%s&q=%s" % (code, urllib.parse.quote(text))
-                with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=8) as r:
+                time.sleep(0.2)                                     # the free service blocks clients that go too fast
+                url = "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=en&tl=%s" % code
+                req = urllib.request.Request(url, data=("q=" + urllib.parse.quote(text)).encode("utf-8"), headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/x-www-form-urlencoded"})
+                with urllib.request.urlopen(req, timeout=10) as r:
                     j = json.loads(r.read().decode("utf-8"))
                 out = "".join(seg[0] for seg in j[0] if seg and seg[0])
                 break
             except Exception:
-                time.sleep(0.5)
+                time.sleep(1.5 * (attempt + 1))
         if not out:
             try:
                 url = "https://api.mymemory.translated.net/get?q=%s&langpair=en|%s" % (urllib.parse.quote(text[:480]), code)

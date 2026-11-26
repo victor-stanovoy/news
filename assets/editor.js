@@ -13,16 +13,28 @@
      "Good enough to read": a person should still check it before it is published. */
   var MM = { zh: 'zh-CN', pt: 'pt-PT' };
   function mmCode(l) { return MM[l] || l; }
-  var protectTerms = [], engine = { g: true };
+  var protectTerms = [], engine = { g: true, bad: 0, since: 0 };
   function decode(t) { var d = document.createElement('textarea'); d.innerHTML = t; return d.value; }
-  function gOne(text, from, to) {
-    return fetch('https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=' + encodeURIComponent(from) + '&tl=' + encodeURIComponent(mmCode(to)) + '&q=' + encodeURIComponent(text)).then(function (r) {
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  var lastCall = 0;
+  function pace() { var d = Date.now() - lastCall, w = d < 250 ? 250 - d : 0; lastCall = Date.now() + w; return wait(w); }   /* never hammer the free service: it blocks fast clients for a while */
+  function gOnce(text, from, to, post) {
+    var base = 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=' + encodeURIComponent(from) + '&tl=' + encodeURIComponent(mmCode(to));
+    var req = post ? fetch(base, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'q=' + encodeURIComponent(text) }) : fetch(base + '&q=' + encodeURIComponent(text));
+    return req.then(function (r) {
       if (!r.ok) throw new Error('g' + r.status);
       return r.json();
     }).then(function (j) {
       if (!j || !j[0]) throw new Error('gempty');
       return j[0].map(function (x) { return x && x[0] || ''; }).join('');
     });
+  }
+  /* up to 4 tries with a growing pause (POST first so long texts fit, then GET) */
+  function gOne(text, from, to) {
+    var tries = [0, 1500, 4000, 9000];
+    return tries.reduce(function (p, delay, i) {
+      return p.catch(function (e) { return wait(delay).then(function () { return pace(); }).then(function () { return gOnce(text, from, to, i % 2 === 0); }); });
+    }, Promise.reject(new Error('start'))).then(function (t) { engine.bad = 0; return t; });
   }
   function mmOne(text, from, to) {
     return fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=' + encodeURIComponent(mmCode(from) + '|' + mmCode(to))).then(function (r) {
@@ -38,7 +50,8 @@
   function tOne(text, from, to) {
     var terms = protectTerms.filter(function (t) { return t && text.toLowerCase().indexOf(t.toLowerCase()) >= 0; }), safe = text;
     terms.forEach(function (t, i) { safe = safe.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'ZQ' + i + 'X'); });
-    var run = engine.g ? gOne(safe, from, to).catch(function () { engine.g = false; return mmOne(safe, from, to); }) : mmOne(safe, from, to);
+    if (!engine.g && Date.now() - engine.since > 90000) { engine.g = true; engine.bad = 0; }   /* give Google another chance after a pause instead of giving up for the whole session */
+    var run = (engine.g ? pace().then(function () { return gOne(safe, from, to); }).catch(function () { if (++engine.bad >= 2) { engine.g = false; engine.since = Date.now(); } return mmOne(safe, from, to); }) : mmOne(safe, from, to));
     return run.then(function (t) {
       terms.forEach(function (term, i) { t = t.replace(new RegExp('ZQ\\s*' + i + '\\s*X', 'gi'), term); });
       return t;
